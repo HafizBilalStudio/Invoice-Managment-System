@@ -7,6 +7,7 @@ export default function ProjectsPage({ user }) {
   const [message, setMessage] = useState('');
   const [syncingProjectId, setSyncingProjectId] = useState(null);
   const [syncingProjects, setSyncingProjects] = useState(false);
+  const [linkingTempoAccounts, setLinkingTempoAccounts] = useState(false);
   const [syncingAllIssues, setSyncingAllIssues] = useState(false);
   const [allIssuesStatus, setAllIssuesStatus] = useState(null);
   const [search, setSearch] = useState('');
@@ -145,6 +146,28 @@ export default function ProjectsPage({ user }) {
     }
   };
 
+  const linkTempoAccounts = async () => {
+    setLinkingTempoAccounts(true);
+    setMessage('Linking existing Jira projects with existing Tempo accounts...');
+
+    try {
+      const result = await projectsApi.linkTempoAccounts();
+      await loadProjects();
+      setMessage(
+        `Tempo account linking completed. Processed: ${result.processedProjects}, linked: ${result.linkedProjects}, unchanged: ${result.unchangedProjects}, no match: ${result.skippedNoTempoMatch}.`
+      );
+    } catch (error) {
+      const backendMessage = error?.response?.data?.message || 'Failed to link projects with Tempo accounts';
+      const backendError = error?.response?.data?.error;
+      const requestId = error?.response?.data?.requestId;
+      setMessage(
+        `${backendMessage}${backendError ? ` | ${backendError}` : ''}${requestId ? ` | requestId: ${requestId}` : ''}`
+      );
+    } finally {
+      setLinkingTempoAccounts(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -158,6 +181,14 @@ export default function ProjectsPage({ user }) {
               className="rounded-md bg-[#14A44D] px-3 py-2 text-xs font-semibold text-white hover:bg-[#118a41] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {syncingProjects ? 'Syncing Projects...' : 'Sync Projects'}
+            </button>
+            <button
+              type="button"
+              onClick={linkTempoAccounts}
+              disabled={linkingTempoAccounts}
+              className="rounded-md bg-[#0EA5E9] px-3 py-2 text-xs font-semibold text-white hover:bg-[#0284c7] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {linkingTempoAccounts ? 'Linking Tempo Accounts...' : 'Link Tempo Accounts'}
             </button>
             <button
               type="button"

@@ -62,6 +62,24 @@ function statusClass(status) {
   }
 }
 
+function toCsvValue(value) {
+  const text = value === null || value === undefined ? '' : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map((row) => row.map(toCsvValue).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 export default function SyncLogsPage({ user }) {
   const [logs, setLogs] = useState([]);
   const [filterOptions, setFilterOptions] = useState({
@@ -74,7 +92,7 @@ export default function SyncLogsPage({ user }) {
   const [selectedLog, setSelectedLog] = useState(null);
   const [filters, setFilters] = useState({
     search: '',
-    jobType: '',
+    jobType: 'TIMELOG_SYNC',
     status: '',
     triggerSource: '',
     fromDate: '',
@@ -110,6 +128,54 @@ export default function SyncLogsPage({ user }) {
       { total: 0, COMPLETED: 0, FAILED: 0, RUNNING: 0, SKIPPED: 0 }
     );
   }, [logs]);
+
+  const selectedSummary = selectedLog?.summary || {};
+  const selectedDetails = selectedLog?.details || {};
+  const skippedProjectReasonCounts = Array.isArray(selectedDetails.skippedProjectReasonCounts)
+    ? selectedDetails.skippedProjectReasonCounts
+    : [];
+  const skippedProjectSamples = Array.isArray(selectedDetails.skippedProjectSamples)
+    ? selectedDetails.skippedProjectSamples
+    : [];
+  const skippedAuthorSamples = Array.isArray(selectedDetails.skippedAuthorSamples)
+    ? selectedDetails.skippedAuthorSamples
+    : [];
+
+  const exportSkippedCsv = () => {
+    if (!selectedLog || selectedLog.jobType !== 'TIMELOG_SYNC') {
+      return;
+    }
+
+    const rows = [
+      ['skip_type', 'external_entry_id', 'issue_key', 'project_number', 'project_account_number', 'author_account_id', 'reason']
+    ];
+
+    skippedProjectSamples.forEach((item) => {
+      rows.push([
+        'PROJECT_CHAIN',
+        item.externalEntryId || '',
+        item.issueKey || '',
+        item.projectNumber || '',
+        item.projectAccountNumber || '',
+        '',
+        item.reason || ''
+      ]);
+    });
+
+    skippedAuthorSamples.forEach((item) => {
+      rows.push([
+        'AUTHOR_MAPPING',
+        item.externalEntryId || '',
+        item.issueKey || '',
+        item.projectNumber || '',
+        '',
+        item.authorAccountId || '',
+        'Author account could not be matched to a local user'
+      ]);
+    });
+
+    downloadCsv(`timelog-sync-skips-${selectedLog.requestId || 'export'}.csv`, rows);
+  };
 
   if (!user?.isSuperAdmin) {
     return <p className="text-sm text-amber-200">Only the configured super admin can view sync logs.</p>;
@@ -208,7 +274,7 @@ export default function SyncLogsPage({ user }) {
           onClick={() =>
             setFilters({
               search: '',
-              jobType: '',
+              jobType: 'TIMELOG_SYNC',
               status: '',
               triggerSource: '',
               fromDate: '',
@@ -298,16 +364,144 @@ export default function SyncLogsPage({ user }) {
                 <h3 className="text-lg font-semibold text-white">Sync Log Details</h3>
                 <p className="mt-1 font-mono text-xs text-slate-400">{selectedLog.requestId}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => setSelectedLog(null)}
-                className="rounded-md border border-[#2D3748] bg-[#1A2233] px-3 py-1.5 text-xs font-semibold text-slate-100 hover:bg-[#243041]"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                {selectedLog.jobType === 'TIMELOG_SYNC' ? (
+                  <button
+                    type="button"
+                    onClick={exportSkippedCsv}
+                    className="rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-100 hover:bg-sky-500/20"
+                  >
+                    Export Skipped CSV
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setSelectedLog(null)}
+                  className="rounded-md border border-[#2D3748] bg-[#1A2233] px-3 py-1.5 text-xs font-semibold text-slate-100 hover:bg-[#243041]"
+                >
+                  Close
+                </button>
+              </div>
             </div>
 
             <div className="grid max-h-[calc(85vh-72px)] gap-4 overflow-y-auto p-5 md:grid-cols-2">
+              {selectedLog.jobType === 'TIMELOG_SYNC' ? (
+                <div className="md:col-span-2 space-y-4">
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <div className="rounded-lg border border-[#2D3748] bg-[#0F172A] p-3">
+                      <p className="text-xs uppercase tracking-wide text-slate-400">Received</p>
+                      <p className="mt-1 text-lg font-semibold text-white">{selectedSummary.syncedCount ?? 0}</p>
+                    </div>
+                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3">
+                      <p className="text-xs uppercase tracking-wide text-emerald-300">Inserted</p>
+                      <p className="mt-1 text-lg font-semibold text-white">{selectedSummary.inserted ?? 0}</p>
+                    </div>
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                      <p className="text-xs uppercase tracking-wide text-amber-300">Skipped Project Chain</p>
+                      <p className="mt-1 text-lg font-semibold text-white">{selectedSummary.skippedNoProjectReference ?? 0}</p>
+                    </div>
+                    <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3">
+                      <p className="text-xs uppercase tracking-wide text-sky-300">Skipped Author Mapping</p>
+                      <p className="mt-1 text-lg font-semibold text-white">{selectedSummary.skippedNoAuthorUser ?? 0}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Project Chain Skip Reasons
+                      </p>
+                      <div className="overflow-hidden rounded-md border border-[#2D3748] bg-[#0F172A]">
+                        {skippedProjectReasonCounts.length > 0 ? (
+                          <table className="min-w-full text-xs text-slate-200">
+                            <thead className="bg-[#111928] text-slate-400">
+                              <tr>
+                                <th className="px-3 py-2 text-left">Reason</th>
+                                <th className="px-3 py-2 text-right">Count</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {skippedProjectReasonCounts.map((item, index) => (
+                                <tr key={`${item.reason}-${index}`} className="border-t border-[#2D3748]">
+                                  <td className="px-3 py-2">{item.reason}</td>
+                                  <td className="px-3 py-2 text-right font-semibold text-white">{item.count}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <div className="px-3 py-4 text-xs text-slate-400">No project-chain skips recorded.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Timelog Summary
+                      </p>
+                      <div className="rounded-md border border-[#2D3748] bg-[#0F172A] p-4 text-xs text-slate-300">
+                        <div className="grid gap-2 md:grid-cols-2">
+                          <div><span className="text-slate-400">Mode:</span> {selectedSummary.mode || '-'}</div>
+                          <div><span className="text-slate-400">Hours:</span> {selectedDetails.totalHours ?? '-'}</div>
+                          <div><span className="text-slate-400">Seen Projects:</span> {selectedDetails.seenProjects ?? '-'}</div>
+                          <div><span className="text-slate-400">Linked Projects:</span> {selectedDetails.linkedProjects ?? '-'}</div>
+                          <div><span className="text-slate-400">Unlinked Projects:</span> {selectedDetails.unlinkedProjects ?? '-'}</div>
+                          <div><span className="text-slate-400">Ambiguous Project Numbers:</span> {selectedDetails.ambiguousProjectNumbers ?? '-'}</div>
+                          <div><span className="text-slate-400">Updated From:</span> {selectedDetails.updatedFrom || '-'}</div>
+                          <div><span className="text-slate-400">Next Cursor:</span> {selectedDetails.nextCursor || '-'}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Sample Skipped Entries: Project Chain
+                      </p>
+                      <div className="rounded-md border border-[#2D3748] bg-[#0F172A] p-4">
+                        {skippedProjectSamples.length > 0 ? (
+                          <div className="space-y-3">
+                            {skippedProjectSamples.map((item, index) => (
+                              <div key={`${item.externalEntryId}-${index}`} className="rounded-md border border-[#2D3748] bg-[#111928] p-3 text-xs text-slate-300">
+                                <div><span className="text-slate-400">Entry:</span> {item.externalEntryId || '-'}</div>
+                                <div><span className="text-slate-400">Issue:</span> {item.issueKey || '-'}</div>
+                                <div><span className="text-slate-400">Project Number:</span> {item.projectNumber || '-'}</div>
+                                <div><span className="text-slate-400">Project Account:</span> {item.projectAccountNumber || '-'}</div>
+                                <div><span className="text-slate-400">Reason:</span> {item.reason || '-'}</div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-400">No sample project-chain skips recorded.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Sample Skipped Entries: Author Mapping
+                      </p>
+                      <div className="rounded-md border border-[#2D3748] bg-[#0F172A] p-4">
+                        {skippedAuthorSamples.length > 0 ? (
+                          <div className="space-y-3">
+                            {skippedAuthorSamples.map((item, index) => (
+                              <div key={`${item.externalEntryId}-${index}`} className="rounded-md border border-[#2D3748] bg-[#111928] p-3 text-xs text-slate-300">
+                                <div><span className="text-slate-400">Entry:</span> {item.externalEntryId || '-'}</div>
+                                <div><span className="text-slate-400">Issue:</span> {item.issueKey || '-'}</div>
+                                <div><span className="text-slate-400">Project Number:</span> {item.projectNumber || '-'}</div>
+                                <div><span className="text-slate-400">Author Account:</span> {item.authorAccountId || '-'}</div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-400">No sample author-mapping skips recorded.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               <div>
                 <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Summary JSON</p>
                 <pre className="overflow-x-auto rounded-md border border-[#2D3748] bg-[#0F172A] p-4 text-[11px] text-slate-300">

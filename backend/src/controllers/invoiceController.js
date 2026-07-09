@@ -318,11 +318,15 @@ async function getInvoiceDetailById(connection, invoiceId) {
             i.amount, i.status, i.pdf_path, i.created_at, i.payee_name_snapshot, i.payee_email_snapshot,
             i.payee_address_line1_snapshot, i.payee_address_line2_snapshot, i.payee_city_snapshot,
             i.payee_state_snapshot, i.payee_postal_code_snapshot, i.payee_country_snapshot,
+            i.bill_to_name_snapshot, i.bill_to_address_line1_snapshot, i.bill_to_address_line2_snapshot,
+            i.bill_to_city_snapshot, i.bill_to_state_snapshot, i.bill_to_postal_code_snapshot,
+            i.bill_to_country_snapshot, i.bill_to_phone_snapshot,
             i.payment_method_snapshot, i.payment_currency_snapshot, i.remittance_email_snapshot,
             i.bank_account_title_snapshot, i.bank_routing_number_snapshot, i.bank_account_number_snapshot,
             i.bank_account_last4_snapshot, i.bank_account_type_snapshot, i.bank_name_snapshot,
             i.bank_address_line1_snapshot, i.bank_address_line2_snapshot, i.bank_city_snapshot,
-            i.bank_state_snapshot, i.bank_postal_code_snapshot, i.bank_country_snapshot
+            i.bank_state_snapshot, i.bank_postal_code_snapshot, i.bank_country_snapshot,
+            i.payout_notes_snapshot
      FROM invoices i
      JOIN users u ON u.id = i.contractor_id
      LEFT JOIN users pm ON pm.id = i.pm_approver_user_id
@@ -445,9 +449,18 @@ async function getInvoiceDetailById(connection, invoiceId) {
       payeeState: invoiceRow.payee_state_snapshot,
       payeePostalCode: invoiceRow.payee_postal_code_snapshot,
       payeeCountry: invoiceRow.payee_country_snapshot,
+      billToName: invoiceRow.bill_to_name_snapshot,
+      billToAddressLine1: invoiceRow.bill_to_address_line1_snapshot,
+      billToAddressLine2: invoiceRow.bill_to_address_line2_snapshot,
+      billToCity: invoiceRow.bill_to_city_snapshot,
+      billToState: invoiceRow.bill_to_state_snapshot,
+      billToPostalCode: invoiceRow.bill_to_postal_code_snapshot,
+      billToCountry: invoiceRow.bill_to_country_snapshot,
+      billToPhone: invoiceRow.bill_to_phone_snapshot,
       paymentMethod: invoiceRow.payment_method_snapshot,
       paymentCurrency: invoiceRow.payment_currency_snapshot,
       remittanceEmail: invoiceRow.remittance_email_snapshot,
+      payoutNotes: invoiceRow.payout_notes_snapshot,
       bankAccountTitle: invoiceRow.bank_account_title_snapshot,
       bankRoutingNumber: invoiceRow.bank_routing_number_snapshot,
       bankAccountNumber: invoiceRow.bank_account_number_snapshot,
@@ -477,12 +490,15 @@ async function getInvoicePdfPayload(connection, invoiceId) {
             i.amount, i.status, i.payee_name_snapshot, i.payee_email_snapshot,
             i.payee_address_line1_snapshot, i.payee_address_line2_snapshot, i.payee_city_snapshot,
             i.payee_state_snapshot, i.payee_postal_code_snapshot, i.payee_country_snapshot,
+            i.bill_to_name_snapshot, i.bill_to_address_line1_snapshot, i.bill_to_address_line2_snapshot,
+            i.bill_to_city_snapshot, i.bill_to_state_snapshot, i.bill_to_postal_code_snapshot,
+            i.bill_to_country_snapshot, i.bill_to_phone_snapshot,
             i.payment_method_snapshot, i.payment_currency_snapshot, i.remittance_email_snapshot,
             i.bank_account_title_snapshot, i.bank_routing_number_snapshot,
             i.bank_account_number_snapshot, i.bank_account_last4_snapshot,
             i.bank_account_type_snapshot, i.bank_name_snapshot, i.bank_address_line1_snapshot,
             i.bank_address_line2_snapshot, i.bank_city_snapshot, i.bank_state_snapshot,
-            i.bank_postal_code_snapshot, i.bank_country_snapshot,
+            i.bank_postal_code_snapshot, i.bank_country_snapshot, i.payout_notes_snapshot,
             u.full_name AS contractor_name, u.email AS contractor_email
      FROM invoices i
      JOIN users u ON u.id = i.contractor_id
@@ -541,9 +557,18 @@ async function getInvoicePdfPayload(connection, invoiceId) {
       payeeState: invoiceRow.payee_state_snapshot,
       payeePostalCode: invoiceRow.payee_postal_code_snapshot,
       payeeCountry: invoiceRow.payee_country_snapshot,
+      billToName: invoiceRow.bill_to_name_snapshot,
+      billToAddressLine1: invoiceRow.bill_to_address_line1_snapshot,
+      billToAddressLine2: invoiceRow.bill_to_address_line2_snapshot,
+      billToCity: invoiceRow.bill_to_city_snapshot,
+      billToState: invoiceRow.bill_to_state_snapshot,
+      billToPostalCode: invoiceRow.bill_to_postal_code_snapshot,
+      billToCountry: invoiceRow.bill_to_country_snapshot,
+      billToPhone: invoiceRow.bill_to_phone_snapshot,
       paymentMethod: invoiceRow.payment_method_snapshot,
       paymentCurrency: invoiceRow.payment_currency_snapshot,
       remittanceEmail: invoiceRow.remittance_email_snapshot,
+      payoutNotes: invoiceRow.payout_notes_snapshot,
       bankAccountTitle: invoiceRow.bank_account_title_snapshot,
       bankRoutingNumber: invoiceRow.bank_routing_number_snapshot,
       bankAccountNumber: invoiceRow.bank_account_number_snapshot,
@@ -677,13 +702,15 @@ const syncAndCreateInvoice = async (req, res) => {
        project_account_number_snapshot, start_date, end_date, total_hours, rate, amount, status,
        pdf_path, payee_name_snapshot, payee_email_snapshot, payee_address_line1_snapshot,
        payee_address_line2_snapshot, payee_city_snapshot, payee_state_snapshot,
-       payee_postal_code_snapshot, payee_country_snapshot, payment_method_snapshot,
-       payment_currency_snapshot, remittance_email_snapshot, bank_account_title_snapshot,
-       bank_routing_number_snapshot, bank_account_number_snapshot, bank_account_last4_snapshot,
-       bank_account_type_snapshot, bank_name_snapshot, bank_address_line1_snapshot,
-       bank_address_line2_snapshot, bank_city_snapshot, bank_state_snapshot,
-       bank_postal_code_snapshot, bank_country_snapshot)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       payee_postal_code_snapshot, payee_country_snapshot, bill_to_name_snapshot,
+       bill_to_address_line1_snapshot, bill_to_address_line2_snapshot, bill_to_city_snapshot,
+       bill_to_state_snapshot, bill_to_postal_code_snapshot, bill_to_country_snapshot,
+       bill_to_phone_snapshot, payment_method_snapshot, payment_currency_snapshot,
+       remittance_email_snapshot, bank_account_title_snapshot, bank_routing_number_snapshot,
+       bank_account_number_snapshot, bank_account_last4_snapshot, bank_account_type_snapshot,
+       bank_name_snapshot, bank_address_line1_snapshot, bank_address_line2_snapshot, bank_city_snapshot,
+       bank_state_snapshot, bank_postal_code_snapshot, bank_country_snapshot, payout_notes_snapshot)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         invoiceNumber,
         contractor.id,
@@ -706,6 +733,14 @@ const syncAndCreateInvoice = async (req, res) => {
         payoutDetails.payeeState,
         payoutDetails.payeePostalCode,
         payoutDetails.payeeCountry,
+        payoutDetails.billToName,
+        payoutDetails.billToAddressLine1,
+        payoutDetails.billToAddressLine2,
+        payoutDetails.billToCity,
+        payoutDetails.billToState,
+        payoutDetails.billToPostalCode,
+        payoutDetails.billToCountry,
+        payoutDetails.billToPhone,
         payoutDetails.paymentMethod,
         payoutDetails.paymentCurrency,
         payoutDetails.remittanceEmail,
@@ -720,7 +755,8 @@ const syncAndCreateInvoice = async (req, res) => {
         payoutDetails.bankCity,
         payoutDetails.bankState,
         payoutDetails.bankPostalCode,
-        payoutDetails.bankCountry
+        payoutDetails.bankCountry,
+        payoutDetails.payoutNotes
       ]
     );
 
@@ -969,6 +1005,88 @@ const listApprovers = async (req, res) => {
     return res.json({ approvers });
   } catch (error) {
     return res.status(500).json({ message: 'Failed to fetch project managers', error: error.message });
+  }
+};
+
+const deleteInvoice = async (req, res) => {
+  const connection = await db.getConnection();
+  let transactionStarted = false;
+
+  try {
+    const invoiceId = Number(req.params.id);
+    if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+      return res.status(400).json({ message: 'Invalid invoice id' });
+    }
+
+    const [invoiceRows] = await connection.query(
+      'SELECT id, invoice_number, contractor_id, status FROM invoices WHERE id = ? LIMIT 1',
+      [invoiceId]
+    );
+
+    if (!invoiceRows[0]) {
+      return res.status(404).json({ message: 'Invoice not found' });
+    }
+
+    const invoice = invoiceRows[0];
+    const canDelete =
+      Number(invoice.contractor_id) === Number(req.user.id) || Boolean(req.user.isSuperAdmin);
+
+    if (!canDelete) {
+      return res.status(403).json({ message: 'You do not have access to delete this invoice' });
+    }
+
+    if (invoice.status !== 'DRAFT') {
+      return res.status(400).json({ message: 'Only draft invoices can be deleted' });
+    }
+
+    await connection.beginTransaction();
+    transactionStarted = true;
+
+    const [approvalRows] = await connection.query(
+      'SELECT id FROM approvals WHERE invoice_id = ?',
+      [invoiceId]
+    );
+    const approvalIds = approvalRows.map((row) => Number(row.id)).filter((value) => value > 0);
+
+    if (approvalIds.length > 0) {
+      await connection.query('DELETE FROM approval_steps WHERE approval_id IN (?)', [approvalIds]);
+    }
+
+    await connection.query('DELETE FROM approvals WHERE invoice_id = ?', [invoiceId]);
+    await connection.query('DELETE FROM payments WHERE invoice_id = ?', [invoiceId]);
+    await connection.query('DELETE FROM comments WHERE invoice_id = ?', [invoiceId]);
+    await connection.query('DELETE FROM invoice_comments WHERE invoice_id = ?', [invoiceId]);
+    await connection.query('DELETE FROM invoice_items WHERE invoice_id = ?', [invoiceId]);
+    await connection.query('DELETE FROM invoices WHERE id = ?', [invoiceId]);
+
+    await connection.query(
+      'INSERT INTO audit_logs (user_id, action, metadata) VALUES (?, ?, ?)',
+      [
+        req.user.id,
+        'INVOICE_DELETED',
+        JSON.stringify({
+          invoiceId,
+          invoiceNumber: invoice.invoice_number,
+          deletedByUserId: req.user.id
+        })
+      ]
+    );
+
+    await connection.commit();
+    transactionStarted = false;
+
+    return res.json({
+      success: true,
+      message: 'Invoice deleted successfully',
+      invoiceId
+    });
+  } catch (error) {
+    if (transactionStarted) {
+      await connection.rollback();
+    }
+    return res.status(500).json({ message: 'Failed to delete invoice', error: error.message });
+  } finally {
+    connection.release();
   }
 };
 
@@ -1366,6 +1484,7 @@ module.exports = {
   listInvoices,
   listApprovers,
   getInvoiceDetail,
+  deleteInvoice,
   updateInvoiceStatus,
   regenerateInvoicePdf,
   addInvoiceComment,

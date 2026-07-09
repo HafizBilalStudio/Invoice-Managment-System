@@ -87,6 +87,7 @@ export default function InvoiceDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [approvers, setApprovers] = useState([]);
   const [selectedApproverId, setSelectedApproverId] = useState('');
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
@@ -144,6 +145,29 @@ export default function InvoiceDetailPage() {
       setMessage(error?.response?.data?.message || 'Failed to submit invoice');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const deleteInvoice = async () => {
+    if (!invoice) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete draft invoice ${invoice.invoiceNumber}? This will permanently remove the invoice and its line items.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setMessage('Deleting invoice...');
+    try {
+      await invoiceApi.delete(invoice.id);
+      navigate(backTo, { replace: true });
+    } catch (error) {
+      setMessage(error?.response?.data?.message || 'Failed to delete invoice');
+      setIsDeleting(false);
     }
   };
 
@@ -207,14 +231,24 @@ export default function InvoiceDetailPage() {
             {isGenerating ? 'Generating...' : 'Generate PDF'}
           </button>
           {invoice.statusCode === 'DRAFT' ? (
-            <button
-              type="button"
-              onClick={() => setShowSubmitDialog(true)}
-              disabled={isSubmitting}
-              className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSubmitting ? 'Submitting...' : 'Submit'}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setShowSubmitDialog(true)}
+                disabled={isSubmitting}
+                className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSubmitting ? 'Submitting...' : 'Submit'}
+              </button>
+              <button
+                type="button"
+                onClick={deleteInvoice}
+                disabled={isDeleting}
+                className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Invoice'}
+              </button>
+            </>
           ) : null}
         </div>
       </div>
@@ -263,6 +297,22 @@ export default function InvoiceDetailPage() {
 
         <section className="space-y-4">
           <div className="rounded-2xl border border-[#2D3748] bg-[#0F1725] p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Bill To</p>
+            <div className="mt-4 space-y-2 text-sm text-slate-200">
+              <p>{payout.billToName || '-'}</p>
+              <p>
+                {joinAddress([
+                  payout.billToAddressLine1,
+                  payout.billToAddressLine2,
+                  joinAddress([payout.billToCity, payout.billToState, payout.billToPostalCode]),
+                  payout.billToCountry
+                ]) || '-'}
+              </p>
+              <p>{payout.billToPhone || '-'}</p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[#2D3748] bg-[#0F1725] p-5">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Recipient</p>
             <div className="mt-4 space-y-2 text-sm text-slate-200">
               <p>{payout.payeeName || invoice.contractorName}</p>
@@ -284,6 +334,7 @@ export default function InvoiceDetailPage() {
               <p>Method: {payout.paymentMethod || '-'}</p>
               <p>Currency: {payout.paymentCurrency || '-'}</p>
               <p>Remittance Email: {payout.remittanceEmail || '-'}</p>
+              <p>Notes / Instructions: {payout.payoutNotes || '-'}</p>
               <p>Account Holder: {payout.bankAccountTitle || '-'}</p>
               <p>Routing Number: {payout.bankRoutingNumber || '-'}</p>
               <p>Account Number: {payout.bankAccountNumber || '-'}</p>

@@ -239,6 +239,33 @@ export default function InvoiceCreatePage({ user }) {
     }
   };
 
+  const deleteTimelogs = async () => {
+    const confirmed = window.confirm(
+      'Delete all synced timelogs and reset the Tempo sync cursor? The next sync will start fresh from 1 Jan 2026.'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setMessage('Deleting all synced timelogs...');
+    try {
+      const result = await timelogApi.deleteAll();
+      setTimelogs([]);
+      setSyncStatus(null);
+      setMessage(
+        `${result.message || 'Timelogs deleted'}${result.deletedCount !== undefined ? ` | deleted: ${result.deletedCount}` : ''}`
+      );
+    } catch (error) {
+      const backendMessage = error?.response?.data?.message || 'Failed to delete timelogs';
+      const requestId = error?.response?.data?.requestId;
+      const linkedCount = error?.response?.data?.linkedInvoiceItemCount;
+      setMessage(
+        `${backendMessage}${linkedCount ? ` | linked invoice items: ${linkedCount}` : ''}${requestId ? ` | requestId: ${requestId}` : ''}`
+      );
+    }
+  };
+
   const createInvoiceForGroup = async (group) => {
     const resolvedRate = Number(rateUsd);
     if (!Number.isFinite(resolvedRate) || resolvedRate <= 0) {
@@ -296,13 +323,23 @@ export default function InvoiceCreatePage({ user }) {
         ) : null}
 
         {user?.isSuperAdmin ? (
-          <button
-            className="w-fit rounded-lg bg-[#3C50E0] px-4 py-2 font-semibold text-white hover:bg-[#3043cc] disabled:cursor-not-allowed disabled:opacity-60"
-            type="submit"
-            disabled={!user?.jiraConnected || isSyncing}
-          >
-            {isSyncing ? 'Sync In Progress...' : 'Sync Timelogs (Async)'}
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              className="w-fit rounded-lg bg-[#3C50E0] px-4 py-2 font-semibold text-white hover:bg-[#3043cc] disabled:cursor-not-allowed disabled:opacity-60"
+              type="submit"
+              disabled={!user?.jiraConnected || isSyncing}
+            >
+              {isSyncing ? 'Sync In Progress...' : 'Sync Timelogs (Async)'}
+            </button>
+            <button
+              type="button"
+              onClick={deleteTimelogs}
+              disabled={isSyncing}
+              className="w-fit rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-2 font-semibold text-rose-100 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Delete All Timelogs
+            </button>
+          </div>
         ) : null}
         <p className="text-sm text-slate-300">{message}</p>
         {syncStatus && (

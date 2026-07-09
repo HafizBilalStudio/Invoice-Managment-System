@@ -138,9 +138,15 @@ async function runTimelogSyncManagedJob({ trigger, requestId, userId = null, jir
         to: result.to,
         updatedFrom: result.updatedFrom,
         nextCursor: result.nextCursor,
+        traceLogFile: result.traceLogFile || null,
         totalHours: result.totalHours,
         linkedProjects: result.linkedProjects,
-        unlinkedProjects: result.unlinkedProjects
+        unlinkedProjects: result.unlinkedProjects,
+        seenProjects: result.seenProjects,
+        ambiguousProjectNumbers: result.ambiguousProjectNumbers,
+        skippedProjectReasonCounts: result.skippedProjectReasonCounts || [],
+        skippedProjectSamples: result.skippedProjectSamples || [],
+        skippedAuthorSamples: result.skippedAuthorSamples || []
       }
     });
 

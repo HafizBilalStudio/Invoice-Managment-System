@@ -58,6 +58,16 @@ function drawLabelValue(doc, x, y, label, value, options = {}) {
   });
 }
 
+function drawStackedLabelValue(doc, x, y, label, value, options = {}) {
+  const width = options.width || 180;
+  const labelGap = options.labelGap || 6;
+
+  doc.font('Helvetica-Bold').fontSize(9).fillColor('#475569').text(label, x, y, { width });
+  doc.font('Helvetica').fontSize(10).fillColor('#0f172a').text(value || '-', x, y + labelGap + 10, {
+    width
+  });
+}
+
 const generateInvoicePdf = (invoice) => {
   const fileName = `invoice-${invoice.invoiceNumber}.pdf`;
   const filePath = path.join(pdfFolder, fileName);
@@ -69,13 +79,14 @@ const generateInvoicePdf = (invoice) => {
     doc.pipe(stream);
 
     const payout = invoice.payoutDetails || {};
+    const accountDisplayValue = invoice.projectAccountNumber || invoice.projectNumber || '-';
     const payeeLines = [
-      invoice.contractorName,
+      payout.payeeName || invoice.contractorName,
       payout.payeeAddressLine1,
       payout.payeeAddressLine2,
       [payout.payeeCity, payout.payeeState, payout.payeePostalCode].filter(Boolean).join(', '),
       payout.payeeCountry,
-      invoice.contractorEmail || payout.remittanceEmail
+      payout.payeeEmail || payout.remittanceEmail || invoice.contractorEmail
     ].filter(Boolean);
 
     let y = 48;
@@ -94,58 +105,66 @@ const generateInvoicePdf = (invoice) => {
 
     doc.moveTo(48, 160).lineTo(547, 160).strokeColor('#cbd5e1').lineWidth(1).stroke();
 
-    drawLabelValue(
+    drawStackedLabelValue(
       doc,
       48,
       176,
       'BILL TO',
-      process.env.INVOICE_BILL_TO_NAME || 'Myemployer',
-      { labelWidth: 65, valueWidth: 170 }
+      payout.billToName || process.env.INVOICE_BILL_TO_NAME || 'Myemployer',
+      { width: 170 }
     );
-    drawLabelValue(
+    drawStackedLabelValue(
       doc,
       300,
       176,
       'PERIOD',
       `${formatDate(invoice.startDate)} To ${formatDate(invoice.endDate)}`,
-      { labelWidth: 55, valueWidth: 190 }
+      { width: 190 }
     );
 
     const billToAddressLines = [
-      process.env.INVOICE_BILL_TO_ADDRESS_LINE1,
-      process.env.INVOICE_BILL_TO_ADDRESS_LINE2,
+      payout.billToAddressLine1 || process.env.INVOICE_BILL_TO_ADDRESS_LINE1,
+      payout.billToAddressLine2 || process.env.INVOICE_BILL_TO_ADDRESS_LINE2,
       [
-        process.env.INVOICE_BILL_TO_CITY,
-        process.env.INVOICE_BILL_TO_STATE,
-        process.env.INVOICE_BILL_TO_POSTAL_CODE
+        payout.billToCity || process.env.INVOICE_BILL_TO_CITY,
+        payout.billToState || process.env.INVOICE_BILL_TO_STATE,
+        payout.billToPostalCode || process.env.INVOICE_BILL_TO_POSTAL_CODE
       ]
         .filter(Boolean)
         .join(' '),
-      process.env.INVOICE_BILL_TO_PHONE
+      payout.billToCountry || process.env.INVOICE_BILL_TO_COUNTRY,
+      payout.billToPhone || process.env.INVOICE_BILL_TO_PHONE
     ].filter(Boolean);
 
-    let billToY = 194;
+    let billToY = 204;
     doc.font('Helvetica').fontSize(10).fillColor('#334155');
     for (const line of billToAddressLines) {
       doc.text(line, 48, billToY);
       billToY += 13;
     }
 
-    drawLabelValue(doc, 48, 250, 'PROJECT', invoice.projectName || '-', {
-      labelWidth: 60,
-      valueWidth: 220
+    const projectSectionTop = 274;
+    doc.rect(48, projectSectionTop, 499, 24).fill('#e2e8f0');
+    doc.font('Helvetica-Bold').fontSize(10).fillColor('#475569').text('PROJECT', 56, projectSectionTop + 7, {
+      width: 220
     });
-    drawLabelValue(doc, 320, 250, 'ACCOUNT', invoice.projectAccountNumber || '-', {
-      labelWidth: 60,
-      valueWidth: 150
+    doc.text('ACCOUNT', 328, projectSectionTop + 7, {
+      width: 150
+    });
+
+    doc.font('Helvetica').fontSize(10).fillColor('#0f172a').text(invoice.projectName || '-', 48, projectSectionTop + 30, {
+      width: 220
+    });
+    doc.text(accountDisplayValue, 320, projectSectionTop + 30, {
+      width: 150
     });
 
     const projectMeta = [invoice.projectKey, invoice.projectNumber].filter(Boolean).join(' | ');
     if (projectMeta) {
-      doc.font('Helvetica').fontSize(10).fillColor('#334155').text(projectMeta, 48, 268);
+      doc.font('Helvetica').fontSize(10).fillColor('#334155').text(projectMeta, 48, projectSectionTop + 48);
     }
 
-    const tableTop = 305;
+    const tableTop = projectSectionTop + 88;
     const ticketX = 48;
     const hoursX = 475;
     doc.rect(48, tableTop, 499, 24).fill('#e2e8f0');
@@ -176,6 +195,7 @@ const generateInvoicePdf = (invoice) => {
     doc.font('Helvetica-Bold').fontSize(10).fillColor('#0f172a').text('Remarks / Payment Instructions:', 48, remarksTop);
 
     const remarksLines = [
+      payout.payoutNotes ? `Instructions: ${payout.payoutNotes}` : null,
       payout.bankAccountTitle ? `Account holder: ${payout.bankAccountTitle}` : null,
       payout.bankRoutingNumber ? `ACH and Wire routing number: ${payout.bankRoutingNumber}` : null,
       payout.bankAccountNumber ? `Account number: ${payout.bankAccountNumber}` : null,

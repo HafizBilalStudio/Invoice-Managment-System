@@ -25,6 +25,7 @@ export default function InvoicesPage() {
   const [dateTo, setDateTo] = useState('');
   const [regeneratingId, setRegeneratingId] = useState(null);
   const [submittingId, setSubmittingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [submitTargetInvoiceId, setSubmitTargetInvoiceId] = useState(null);
   const [selectedApproverId, setSelectedApproverId] = useState('');
 
@@ -99,6 +100,27 @@ export default function InvoicesPage() {
       setMessage(error?.response?.data?.message || 'Failed to submit invoice for approval');
     } finally {
       setSubmittingId(null);
+    }
+  };
+
+  const deleteInvoice = async (invoiceId, invoiceNumber) => {
+    const confirmed = window.confirm(
+      `Delete draft invoice ${invoiceNumber}? This will permanently remove the invoice and its line items.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(invoiceId);
+    setMessage('Deleting invoice...');
+    try {
+      await invoiceApi.delete(invoiceId);
+      await loadInvoices();
+      setMessage('Invoice deleted successfully.');
+    } catch (error) {
+      setMessage(error?.response?.data?.message || 'Failed to delete invoice');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -226,17 +248,27 @@ export default function InvoicesPage() {
                           {regeneratingId === invoice.id ? 'Generating...' : 'Generate PDF'}
                         </button>
                         {invoice.statusCode === 'DRAFT' ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSubmitTargetInvoiceId(invoice.id);
-                              setSelectedApproverId('');
-                            }}
-                            disabled={submittingId === invoice.id}
-                            className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {submittingId === invoice.id ? 'Submitting...' : 'Submit'}
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSubmitTargetInvoiceId(invoice.id);
+                                setSelectedApproverId('');
+                              }}
+                              disabled={submittingId === invoice.id}
+                              className="rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {submittingId === invoice.id ? 'Submitting...' : 'Submit'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteInvoice(invoice.id, invoice.invoiceNumber)}
+                              disabled={deletingId === invoice.id}
+                              className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {deletingId === invoice.id ? 'Deleting...' : 'Delete'}
+                            </button>
+                          </>
                         ) : null}
                       </div>
                     </td>

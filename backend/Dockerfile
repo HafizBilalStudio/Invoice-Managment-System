@@ -7,7 +7,7 @@ RUN npm install
 
 COPY . .
 
-RUN mkdir -p storage/pdfs
+RUN mkdir -p storage/pdfs logs
 
 EXPOSE 4000
 

@@ -5,6 +5,7 @@ const {
   listInvoices,
   listApprovers,
   getInvoiceDetail,
+  deleteInvoice,
   updateInvoiceStatus,
   regenerateInvoicePdf,
   addInvoiceComment,
@@ -17,6 +18,7 @@ router.use(requireAuth);
 router.get('/', listInvoices);
 router.get('/approvers', listApprovers);
 router.get('/:id', getInvoiceDetail);
+router.delete('/:id', deleteInvoice);
 router.post('/sync-create', syncAndCreateInvoice);
 router.post('/:id/submit', submitInvoiceForApproval);
 router.post('/:id/regenerate-pdf', regenerateInvoicePdf);

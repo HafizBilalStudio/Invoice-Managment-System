@@ -4,13 +4,22 @@ import { profileApi } from '../services/api';
 const initialForm = {
   hourlyRateUsd: '',
   paymentMethod: '',
+  beneficiaryName: '',
   beneficiaryAddressLine1: '',
   beneficiaryAddressLine2: '',
   beneficiaryCity: '',
   beneficiaryState: '',
   beneficiaryPostalCode: '',
   beneficiaryCountry: 'United States',
-  emailForRemittance: '',
+  beneficiaryEmail: '',
+  billToName: '',
+  billToAddressLine1: '',
+  billToAddressLine2: '',
+  billToCity: '',
+  billToState: '',
+  billToPostalCode: '',
+  billToCountry: 'United States',
+  billToPhone: '',
   bankAccountTitle: '',
   bankRoutingNumber: '',
   bankAccountNumber: '',
@@ -22,8 +31,7 @@ const initialForm = {
   bankState: '',
   bankPostalCode: '',
   bankCountry: 'United States',
-  notes: '',
-  effectiveFrom: ''
+  notes: ''
 };
 
 function InfoRow({ label, value }) {
@@ -48,13 +56,22 @@ export default function ProfilePage({ user, oauthUrls, onJiraDisconnect }) {
       setForm({
         hourlyRateUsd: response.profile?.hourlyRateUsd ?? '',
         paymentMethod: response.profile?.paymentMethod || '',
+        beneficiaryName: response.profile?.beneficiaryName || '',
         beneficiaryAddressLine1: response.profile?.beneficiaryAddressLine1 || '',
         beneficiaryAddressLine2: response.profile?.beneficiaryAddressLine2 || '',
         beneficiaryCity: response.profile?.beneficiaryCity || '',
         beneficiaryState: response.profile?.beneficiaryState || '',
         beneficiaryPostalCode: response.profile?.beneficiaryPostalCode || '',
         beneficiaryCountry: response.profile?.beneficiaryCountry || 'United States',
-        emailForRemittance: response.profile?.emailForRemittance || '',
+        beneficiaryEmail: response.profile?.beneficiaryEmail || '',
+        billToName: response.profile?.billToName || '',
+        billToAddressLine1: response.profile?.billToAddressLine1 || '',
+        billToAddressLine2: response.profile?.billToAddressLine2 || '',
+        billToCity: response.profile?.billToCity || '',
+        billToState: response.profile?.billToState || '',
+        billToPostalCode: response.profile?.billToPostalCode || '',
+        billToCountry: response.profile?.billToCountry || 'United States',
+        billToPhone: response.profile?.billToPhone || '',
         bankAccountTitle: response.profile?.bankAccountTitle || '',
         bankRoutingNumber: response.profile?.bankRoutingNumber || '',
         bankAccountNumber: response.profile?.bankAccountNumber || '',
@@ -66,8 +83,7 @@ export default function ProfilePage({ user, oauthUrls, onJiraDisconnect }) {
         bankState: response.profile?.bankState || '',
         bankPostalCode: response.profile?.bankPostalCode || '',
         bankCountry: response.profile?.bankCountry || 'United States',
-        notes: response.profile?.notes || '',
-        effectiveFrom: response.profile?.effectiveFrom ? response.profile.effectiveFrom.slice(0, 10) : ''
+        notes: response.profile?.notes || ''
       });
       setVerifiedAt(response.profile?.verifiedAt || null);
       setMessage('');
@@ -185,26 +201,27 @@ export default function ProfilePage({ user, oauthUrls, onJiraDisconnect }) {
             <option value="Wire">Wire</option>
             <option value="Direct Deposit">Direct Deposit</option>
           </select>
-          <input
-            type="email"
-            name="emailForRemittance"
-            value={form.emailForRemittance}
-            onChange={onChange}
-            placeholder="Remittance Email"
-            className="rounded-lg border border-[#2D3748] bg-[#111928] px-3 py-2 text-sm text-white"
-          />
-          <input
-            type="date"
-            name="effectiveFrom"
-            value={form.effectiveFrom}
-            onChange={onChange}
-            className="rounded-lg border border-[#2D3748] bg-[#111928] px-3 py-2 text-sm text-white"
-          />
         </div>
 
         <div className="rounded-xl border border-[#2D3748] bg-[#111928]/70 p-4">
           <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-200">Beneficiary Address</h4>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <input
+              type="text"
+              name="beneficiaryName"
+              value={form.beneficiaryName}
+              onChange={onChange}
+              placeholder="Beneficiary Name"
+              className="rounded-lg border border-[#2D3748] bg-[#0F172A] px-3 py-2 text-sm text-white"
+            />
+            <input
+              type="email"
+              name="beneficiaryEmail"
+              value={form.beneficiaryEmail}
+              onChange={onChange}
+              placeholder="Beneficiary Email"
+              className="rounded-lg border border-[#2D3748] bg-[#0F172A] px-3 py-2 text-sm text-white"
+            />
             <input
               type="text"
               name="beneficiaryAddressLine1"
@@ -252,6 +269,79 @@ export default function ProfilePage({ user, oauthUrls, onJiraDisconnect }) {
               onChange={onChange}
               placeholder="Country"
               className="rounded-lg border border-[#2D3748] bg-[#0F172A] px-3 py-2 text-sm text-white"
+            />
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[#2D3748] bg-[#111928]/70 p-4">
+          <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-200">Bill To Company</h4>
+          <p className="mt-1 text-xs text-slate-400">
+            This company information is printed in the invoice Bill To block.
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <input
+              type="text"
+              name="billToName"
+              value={form.billToName}
+              onChange={onChange}
+              placeholder="Company Name"
+              className="rounded-lg border border-[#2D3748] bg-[#0F172A] px-3 py-2 text-sm text-white md:col-span-2"
+            />
+            <input
+              type="text"
+              name="billToAddressLine1"
+              value={form.billToAddressLine1}
+              onChange={onChange}
+              placeholder="Address Line 1"
+              className="rounded-lg border border-[#2D3748] bg-[#0F172A] px-3 py-2 text-sm text-white md:col-span-2"
+            />
+            <input
+              type="text"
+              name="billToAddressLine2"
+              value={form.billToAddressLine2}
+              onChange={onChange}
+              placeholder="Address Line 2"
+              className="rounded-lg border border-[#2D3748] bg-[#0F172A] px-3 py-2 text-sm text-white md:col-span-2"
+            />
+            <input
+              type="text"
+              name="billToCity"
+              value={form.billToCity}
+              onChange={onChange}
+              placeholder="City"
+              className="rounded-lg border border-[#2D3748] bg-[#0F172A] px-3 py-2 text-sm text-white"
+            />
+            <input
+              type="text"
+              name="billToState"
+              value={form.billToState}
+              onChange={onChange}
+              placeholder="State"
+              className="rounded-lg border border-[#2D3748] bg-[#0F172A] px-3 py-2 text-sm text-white"
+            />
+            <input
+              type="text"
+              name="billToPostalCode"
+              value={form.billToPostalCode}
+              onChange={onChange}
+              placeholder="Postal Code"
+              className="rounded-lg border border-[#2D3748] bg-[#0F172A] px-3 py-2 text-sm text-white"
+            />
+            <input
+              type="text"
+              name="billToCountry"
+              value={form.billToCountry}
+              onChange={onChange}
+              placeholder="Country"
+              className="rounded-lg border border-[#2D3748] bg-[#0F172A] px-3 py-2 text-sm text-white"
+            />
+            <input
+              type="text"
+              name="billToPhone"
+              value={form.billToPhone}
+              onChange={onChange}
+              placeholder="Phone"
+              className="rounded-lg border border-[#2D3748] bg-[#0F172A] px-3 py-2 text-sm text-white md:col-span-2"
             />
           </div>
         </div>

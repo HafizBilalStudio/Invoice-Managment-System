@@ -38,6 +38,7 @@ services:
       - "4000:4000"
     volumes:
       - ./backend/storage/pdfs:/app/storage/pdfs
+      - ./backend/logs:/app/logs
 
   frontend:
     build:
