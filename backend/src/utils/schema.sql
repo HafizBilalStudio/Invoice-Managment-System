@@ -11,7 +11,7 @@ CREATE TABLE users (
 
 CREATE TABLE invoices (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  invoice_number VARCHAR(100) UNIQUE NOT NULL,
+  invoice_number VARCHAR(255) UNIQUE NOT NULL,
   contractor_id BIGINT NOT NULL,
   pm_approver_user_id BIGINT,
   project_name VARCHAR(255) NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE invoices (
   total_hours DECIMAL(10,2) NOT NULL,
   rate DECIMAL(10,2) NOT NULL,
   amount DECIMAL(10,2) NOT NULL,
-  status ENUM('DRAFT', 'PENDING_PM', 'REJECTED_PM', 'APPROVED_PM', 'PAID') NOT NULL,
+  status ENUM('DRAFT', 'PENDING_PM', 'REJECTED_PM', 'APPROVED_PM', 'PAID', 'CANCELLED') NOT NULL,
   pdf_path VARCHAR(255),
   payee_name_snapshot VARCHAR(255),
   payee_email_snapshot VARCHAR(255),
@@ -45,6 +45,9 @@ CREATE TABLE invoices (
   bank_state_snapshot VARCHAR(100),
   bank_postal_code_snapshot VARCHAR(50),
   bank_country_snapshot VARCHAR(100),
+  pdf_background_color_snapshot VARCHAR(7),
+  pdf_text_color_snapshot VARCHAR(7),
+  pdf_heading_background_color_snapshot VARCHAR(7),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (contractor_id) REFERENCES users(id),
   FOREIGN KEY (pm_approver_user_id) REFERENCES users(id)

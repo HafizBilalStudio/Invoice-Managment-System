@@ -83,7 +83,7 @@ async function runTimelogSyncManagedJob({ trigger, requestId, userId = null, jir
             deletedMarked: 0,
             deletedMissing: 0,
             skippedNoProjectReference: 0,
-            skippedNoAuthorUser: 0
+            unmappedAuthorUserCount: 0
           },
           details: { reason: 'missing_super_admin_jira_connection' }
         });
@@ -129,7 +129,7 @@ async function runTimelogSyncManagedJob({ trigger, requestId, userId = null, jir
         deletedMarked: result.deletedMarked,
         deletedMissing: result.deletedMissing,
         skippedNoProjectReference: result.skippedNoProjectReference,
-        skippedNoAuthorUser: result.skippedNoAuthorUser
+        unmappedAuthorUserCount: result.unmappedAuthorUserCount
       },
       details: {
         requestId,

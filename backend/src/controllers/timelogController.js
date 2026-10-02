@@ -163,175 +163,69 @@ function buildProjectCatalog(entries) {
 
 async function mapProjectsFromCatalog(connection, catalog, requestId, traceLogger = null) {
   const projectNumbers = [...new Set(catalog.map((p) => p.projectNumber).filter(Boolean))];
-  const projectIdMap = new Map();
-  const projectById = new Map();
+  const accountByProjectNumber = new Map();
   const chainBreakReasons = new Map();
-  let ambiguousProjectNumbers = 0;
 
   if (projectNumbers.length > 0) {
-    const projectNumberPlaceholders = projectNumbers.map(() => '?').join(', ');
+    const placeholders = projectNumbers.map(() => '?').join(', ');
     const [tempoRows] = await connection.query(
-      `SELECT account_key, tempo_account_id
+      `SELECT tempo_account_id, account_key, name, status
        FROM tempo_accounts
-       WHERE account_key IN (${projectNumberPlaceholders})`,
+       WHERE account_key IN (${placeholders})`,
       projectNumbers
     );
-    const tempoByProjectNumber = new Map(tempoRows.map((row) => [String(row.account_key), Number(row.tempo_account_id)]));
 
-    const tempoAccountIds = [...new Set(tempoRows.map((row) => Number(row.tempo_account_id)).filter((id) => Number.isFinite(id) && id > 0))];
-    const jiraByTempoAccountId = new Map();
-
-    if (tempoAccountIds.length > 0) {
-      const tempoAccountPlaceholders = tempoAccountIds.map(() => '?').join(', ');
-      const [jiraRows] = await connection.query(
-        `SELECT account_id, project_id
-         FROM jira_issues
-         WHERE CAST(account_id AS UNSIGNED) IN (${tempoAccountPlaceholders})`,
-        tempoAccountIds
-      );
-
-      for (const row of jiraRows) {
-        const tempoAccountId = Number(row.account_id);
-        if (!Number.isFinite(tempoAccountId) || tempoAccountId <= 0) {
-          continue;
-        }
-
-        if (!jiraByTempoAccountId.has(tempoAccountId)) {
-          jiraByTempoAccountId.set(tempoAccountId, {
-            hasAnyIssue: false,
-            projectIds: new Set()
-          });
-        }
-
-        const aggregate = jiraByTempoAccountId.get(tempoAccountId);
-        aggregate.hasAnyIssue = true;
-        if (row.project_id !== null && row.project_id !== undefined) {
-          const projectId = Number(row.project_id);
-          if (Number.isFinite(projectId) && projectId > 0) {
-            aggregate.projectIds.add(projectId);
-          }
-        }
-      }
-    }
-
-    for (const projectNumber of projectNumbers) {
-      const tempoAccountId = tempoByProjectNumber.get(projectNumber);
-      if (!tempoAccountId) {
-        chainBreakReasons.set(projectNumber, 'No matching tempo_accounts.account_key row found');
-        traceLogger?.write('project-chain-unmatched', {
-          projectNumber,
-          reason: 'No matching tempo_accounts.account_key row found'
-        });
+    for (const row of tempoRows) {
+      const accountKey = String(row.account_key || '');
+      if (!accountKey) {
         continue;
       }
-
-      const jiraAggregate = jiraByTempoAccountId.get(tempoAccountId);
-      if (!jiraAggregate || !jiraAggregate.hasAnyIssue) {
-        chainBreakReasons.set(
-          projectNumber,
-          `No jira_issues rows found for account_id mapped from tempo_account_id=${tempoAccountId}`
-        );
-        traceLogger?.write('project-chain-unmatched', {
-          projectNumber,
-          tempoAccountId,
-          reason: `No jira_issues rows found for account_id mapped from tempo_account_id=${tempoAccountId}`
-        });
-        continue;
-      }
-
-      const projectIds = [...jiraAggregate.projectIds];
-      if (projectIds.length === 0) {
-        chainBreakReasons.set(
-          projectNumber,
-          `jira_issues found for tempo_account_id=${tempoAccountId} but project_id is null or invalid`
-        );
-        traceLogger?.write('project-chain-unmatched', {
-          projectNumber,
-          tempoAccountId,
-          reason: `jira_issues found for tempo_account_id=${tempoAccountId} but project_id is null or invalid`
-        });
-        continue;
-      }
-
-      const selectedProjectId = Math.min(...projectIds);
-      projectIdMap.set(projectNumber, selectedProjectId);
-
-      if (projectIds.length > 1) {
-        ambiguousProjectNumbers += 1;
-        logger.warn('Timelog sync: multiple projects matched same Tempo account key, using smallest project id', {
-          requestId,
-          projectNumber,
-          projectCount: projectIds.length,
-          selectedProjectId
-        });
-        traceLogger?.write('project-chain-ambiguous', {
-          projectNumber,
-          tempoAccountId,
-          projectIds,
-          selectedProjectId
-        });
-      }
-
-      traceLogger?.write('project-chain-mapped', {
-        projectNumber,
-        tempoAccountId,
-        selectedProjectId,
-        projectIds
+      accountByProjectNumber.set(accountKey, {
+        tempoAccountId: Number(row.tempo_account_id),
+        accountKey,
+        accountName: row.name || null,
+        status: row.status || null
+      });
+      traceLogger?.write('tempo-account-mapped', {
+        projectNumber: accountKey,
+        tempoAccountId: Number(row.tempo_account_id),
+        accountName: row.name || null,
+        status: row.status || null
       });
     }
 
-    const projectIds = [...new Set([...projectIdMap.values()])];
-    if (projectIds.length > 0) {
-      const projectIdPlaceholders = projectIds.map(() => '?').join(', ');
-      const [projectRows] = await connection.query(
-        `SELECT id, project_key, project_name, project_number, project_account_number
-         FROM projects
-         WHERE id IN (${projectIdPlaceholders})`,
-        projectIds
-      );
-      for (const row of projectRows) {
-        projectById.set(Number(row.id), row);
-      }
-    }
-
-    for (const [projectNumber, projectId] of projectIdMap.entries()) {
-      if (!projectById.has(Number(projectId))) {
-        chainBreakReasons.set(
+    for (const projectNumber of projectNumbers) {
+      if (!accountByProjectNumber.has(projectNumber)) {
+        const reason = 'No matching tempo_accounts.account_key row found';
+        chainBreakReasons.set(projectNumber, reason);
+        traceLogger?.write('tempo-account-unmatched', {
           projectNumber,
-          `Resolved jira_issues.project_id=${projectId} not found in projects table`
-        );
-        traceLogger?.write('project-chain-unmatched', {
-          projectNumber,
-          projectId,
-          reason: `Resolved jira_issues.project_id=${projectId} not found in projects table`
+          reason
         });
-        projectIdMap.delete(projectNumber);
       }
     }
   }
 
   const seenProjects = catalog.length;
-  const linkedProjects = projectIdMap.size;
+  const linkedProjects = accountByProjectNumber.size;
   const unlinkedProjects = Math.max(seenProjects - linkedProjects, 0);
 
-  logger.info('Timelog sync: project link mapping complete', {
+  logger.info('Timelog sync: Tempo account mapping complete', {
     requestId,
     seenProjects,
     linkedProjects,
-    unlinkedProjects,
-    ambiguousProjectNumbers
+    unlinkedProjects
   });
 
   return {
-    projectIdMap,
-    projectById,
+    accountByProjectNumber,
     chainBreakReasons,
     insertedProjects: 0,
     updatedProjects: 0,
     seenProjects,
     linkedProjects,
     unlinkedProjects,
-    ambiguousProjectNumbers
+    ambiguousProjectNumbers: 0
   };
 }
 
@@ -430,11 +324,10 @@ async function getTimelogsForUser(accountId, from, to) {
             te.project_key, te.project_name, te.project_number, te.project_account_number,
             te.issue_key, te.jira_issue_api_id, te.jira_issue_ref_id, te.created_at, te.updated_at, te.source_deleted_at,
             ji.issue_key AS linked_issue_key,
-            p.id AS project_id, p.project_key AS linked_project_key, p.project_name AS linked_project_name,
-            p.project_number AS linked_project_number, p.project_account_number AS linked_project_account_number
+            ta.tempo_account_id, ta.account_key AS linked_account_key, ta.name AS linked_account_name, ta.status AS linked_account_status
      FROM timesheet_entries te
      LEFT JOIN jira_issues ji ON ji.id = te.jira_issue_ref_id
-     LEFT JOIN projects p ON p.id = te.project_id
+     LEFT JOIN tempo_accounts ta ON ta.account_key = te.project_number
      WHERE ${filters.join(' AND ')}
      ORDER BY te.work_date DESC, te.id DESC`,
     values
@@ -447,11 +340,15 @@ async function getTimelogsForUser(accountId, from, to) {
     workDate: row.work_date,
     hours: Number(row.hours),
     description: row.description,
-    projectId: row.project_id,
-    projectKey: row.linked_project_key || row.project_key,
-    projectName: row.linked_project_name || row.project_name,
-    projectNumber: row.linked_project_number || row.project_number,
-    projectAccountNumber: row.linked_project_account_number || row.project_account_number,
+    projectId: null,
+    projectKey: row.linked_account_key || row.project_number || row.project_key,
+    projectName: row.linked_account_name || row.project_name,
+    projectNumber: row.linked_account_key || row.project_number,
+    projectAccountNumber: row.linked_account_key || row.project_account_number || row.project_number,
+    accountId: row.tempo_account_id ? Number(row.tempo_account_id) : null,
+    accountKey: row.linked_account_key || row.project_number || row.project_key,
+    accountName: row.linked_account_name || row.project_name,
+    accountStatus: row.linked_account_status || null,
     issueKey: row.linked_issue_key || row.issue_key,
     jiraIssueApiId: row.jira_issue_api_id,
     jiraIssueRefId: row.jira_issue_ref_id,
@@ -479,7 +376,7 @@ function getTimelogSyncState(userId) {
       syncedCount: 0,
       deletedMarked: 0,
       deletedMissing: 0,
-      skippedNoAuthorUser: 0,
+      unmappedAuthorUserCount: 0,
       inserted: 0,
       updated: 0,
       unchanged: 0,
@@ -544,7 +441,7 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
   state.syncedCount = 0;
   state.deletedMarked = 0;
   state.deletedMissing = 0;
-  state.skippedNoAuthorUser = 0;
+  state.unmappedAuthorUserCount = 0;
   state.inserted = 0;
   state.updated = 0;
   state.unchanged = 0;
@@ -616,18 +513,16 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
     const jiraIssueRefMap = await mapJiraIssueReferences(connection, entries, requestId);
     const authorUserMap = await mapAuthorUsers(connection, entries, requestId);
     traceLogger.write('lookup-maps-ready', {
-      projectLinks: projectReconcile.projectIdMap.size,
+      accountLinks: projectReconcile.accountByProjectNumber.size,
       jiraIssueRefs: jiraIssueRefMap.size,
       authorUsers: authorUserMap.size
     });
-
-    const projectIdByNumber = projectReconcile.projectIdMap;
 
     let inserted = 0;
     let updated = 0;
     let unchanged = 0;
     let skippedNoProjectReference = 0;
-    let skippedNoAuthorUser = 0;
+    let unmappedAuthorUserCount = 0;
     let deletedMarked = 0;
     let deletedMissing = 0;
     const skippedProjectReasonCounts = new Map();
@@ -642,15 +537,17 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
       const externalEntryId = getExternalEntryId(entry, index);
       const workDate = mapWorkDate(entry, from);
       const mappedProject = mapProject(entry);
-      const projectId = mappedProject.projectNumber ? projectIdByNumber.get(mappedProject.projectNumber) || null : null;
-      const linkedProject = projectId ? projectReconcile.projectById.get(Number(projectId)) : null;
-      const effectiveProject = linkedProject
+      const linkedAccount = mappedProject.projectNumber
+        ? projectReconcile.accountByProjectNumber.get(mappedProject.projectNumber) || null
+        : null;
+      const projectId = null;
+      const effectiveProject = linkedAccount
         ? {
             issueKey: mappedProject.issueKey,
-            projectKey: linkedProject.project_key || mappedProject.projectKey,
-            projectName: linkedProject.project_name || mappedProject.projectName,
-            projectNumber: linkedProject.project_number || mappedProject.projectNumber,
-            projectAccountNumber: linkedProject.project_account_number || mappedProject.projectAccountNumber
+            projectKey: linkedAccount.accountKey,
+            projectName: linkedAccount.accountName || mappedProject.projectName,
+            projectNumber: linkedAccount.accountKey,
+            projectAccountNumber: linkedAccount.accountKey
           }
         : mappedProject;
       const rawPayload = JSON.stringify(entry);
@@ -677,35 +574,37 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
         projectNumber: mappedProject.projectNumber || null,
         projectAccountNumber: mappedProject.projectAccountNumber || null,
         resolvedProjectId: projectId,
-        chainBreakReason
-      });
+          matchedTempoAccountId: linkedAccount?.tempoAccountId || null,
+          matchedTempoAccountName: linkedAccount?.accountName || null,
+          chainBreakReason
+        });
 
-      if (!projectId) {
+      if (!linkedAccount) {
         incrementReasonCount(
           skippedProjectReasonCounts,
-          chainBreakReason || 'No linked projects.id found through chain'
+          chainBreakReason || 'No matching tempo_accounts.account_key row found'
         );
         pushSample(skippedProjectSamples, {
           externalEntryId,
           issueKey: mappedProject.issueKey || null,
           projectNumber: mappedProject.projectNumber || null,
           projectAccountNumber: mappedProject.projectAccountNumber || null,
-          reason: chainBreakReason || 'No linked projects.id found through chain'
+          reason: chainBreakReason || 'No matching tempo_accounts.account_key row found'
         });
-        logger.warn('Timelog sync: entry skipped, project chain not resolved', {
+        logger.warn('Timelog sync: entry skipped, tempo account not resolved', {
           requestId,
           externalEntryId,
           issueKey: mappedProject.issueKey || null,
           projectNumber: mappedProject.projectNumber || null,
-          reason: chainBreakReason || 'No linked projects.id found through chain'
+          reason: chainBreakReason || 'No matching tempo_accounts.account_key row found'
         });
-        traceLogger.write('entry-skipped-project-chain', {
+        traceLogger.write('entry-skipped-tempo-account', {
           externalEntryId,
           authorAccountId: authorAccountId || null,
           issueKey: mappedProject.issueKey || null,
           projectNumber: mappedProject.projectNumber || null,
           projectAccountNumber: mappedProject.projectAccountNumber || null,
-          reason: chainBreakReason || 'No linked projects.id found through chain'
+          reason: chainBreakReason || 'No matching tempo_accounts.account_key row found'
         });
         skippedNoProjectReference += 1;
         continue;
@@ -718,7 +617,7 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
           issueKey: effectiveProject.issueKey || null,
           projectNumber: effectiveProject.projectNumber || null
         });
-        logger.warn('Timelog sync: entry skipped, author user not resolved', {
+        logger.info('Timelog sync: entry has no local user mapping, storing with author account only', {
           requestId,
           externalEntryId,
           authorAccountId: authorAccountId || null,
@@ -732,8 +631,7 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
           projectKey: effectiveProject.projectKey || null,
           projectNumber: effectiveProject.projectNumber || null
         });
-        skippedNoAuthorUser += 1;
-        continue;
+        unmappedAuthorUserCount += 1;
       }
 
       const [existingRows] = await connection.query(
@@ -893,7 +791,7 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
           inserted,
           updated,
           unchanged,
-          skippedNoAuthorUser,
+          unmappedAuthorUserCount,
           skippedNoProjectReference
         });
       }
@@ -938,7 +836,7 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
           inserted,
           updated,
           unchanged,
-          skippedNoAuthorUser,
+          unmappedAuthorUserCount,
           deletedMarked,
           deletedMissing,
           skippedNoProjectReference,
@@ -959,7 +857,7 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
       updated,
       unchanged,
       skippedNoProjectReference,
-      skippedNoAuthorUser,
+      unmappedAuthorUserCount,
       deletedMarked,
       deletedMissing
     });
@@ -968,7 +866,7 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
       inserted,
       updated,
       unchanged,
-      skippedNoAuthorUser,
+      unmappedAuthorUserCount,
       deletedMarked,
       deletedMissing,
       skippedNoProjectReference,
@@ -1018,7 +916,7 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
       inserted,
       updated,
       unchanged,
-      skippedNoAuthorUser,
+      unmappedAuthorUserCount,
       deletedMarked,
       deletedMissing,
       skippedNoProjectReference,
@@ -1043,7 +941,7 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
       updated: result.updated,
       unchanged: result.unchanged,
       skippedNoProjectReference: result.skippedNoProjectReference,
-      skippedNoAuthorUser: result.skippedNoAuthorUser,
+      unmappedAuthorUserCount: result.unmappedAuthorUserCount,
       traceLogFile: traceLogger.fileName
     });
 
@@ -1051,7 +949,7 @@ async function runTimelogSyncJob({ userId, jiraAccountId, requestId }) {
     state.syncedCount = result.syncedCount;
     state.deletedMarked = result.deletedMarked;
     state.deletedMissing = result.deletedMissing;
-    state.skippedNoAuthorUser = result.skippedNoAuthorUser;
+    state.unmappedAuthorUserCount = result.unmappedAuthorUserCount;
     state.inserted = result.inserted;
     state.updated = result.updated;
     state.unchanged = result.unchanged;

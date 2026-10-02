@@ -22,7 +22,7 @@ export default function ApprovalsPage({ user }) {
   const [commentByInvoice, setCommentByInvoice] = useState({});
   const [message, setMessage] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [projectFilter, setProjectFilter] = useState('all');
+  const [accountFilter, setAccountFilter] = useState('all');
   const [contractorFilter, setContractorFilter] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -37,8 +37,8 @@ export default function ApprovalsPage({ user }) {
         params.status = statusFilter;
       }
 
-      if (projectFilter !== 'all') {
-        params.projectKey = projectFilter;
+      if (accountFilter !== 'all') {
+        params.projectKey = accountFilter;
       }
       if (contractorFilter !== 'all') {
         params.contractorId = contractorFilter;
@@ -61,9 +61,9 @@ export default function ApprovalsPage({ user }) {
 
   useEffect(() => {
     load();
-  }, [statusFilter, projectFilter, contractorFilter, dateFrom, dateTo]);
+  }, [statusFilter, accountFilter, contractorFilter, dateFrom, dateTo]);
 
-  const projectOptions = useMemo(() => {
+  const accountOptions = useMemo(() => {
     const map = new Map();
     invoices.forEach((invoice) => {
       const key = invoice.projectKey || '-';
@@ -133,12 +133,12 @@ export default function ApprovalsPage({ user }) {
           <option value="PAID">Paid</option>
         </select>
         <select
-          value={projectFilter}
-          onChange={(event) => setProjectFilter(event.target.value)}
+          value={accountFilter}
+          onChange={(event) => setAccountFilter(event.target.value)}
           className="rounded-lg border border-[#2D3748] bg-[#1A2233] px-3 py-2 text-sm text-white"
         >
-          <option value="all">All Projects</option>
-          {projectOptions.map((option) => (
+          <option value="all">All Accounts</option>
+          {accountOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
@@ -185,7 +185,7 @@ export default function ApprovalsPage({ user }) {
                 {invoice.amount})
               </p>
               <p className="mt-1 text-sm text-slate-400">
-                Status: {invoice.status} | Project: {invoice.projectKey || '-'} | Period: {formatDate(invoice.startDate)} -{' '}
+                Status: {invoice.status} | Account: {invoice.projectKey || '-'} | Period: {formatDate(invoice.startDate)} -{' '}
                 {formatDate(invoice.endDate)}
               </p>
               {canActOnInvoice ? (

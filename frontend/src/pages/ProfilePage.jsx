@@ -31,6 +31,10 @@ const initialForm = {
   bankState: '',
   bankPostalCode: '',
   bankCountry: 'United States',
+  pdfBackgroundColor: '#FFFFFF',
+  pdfTextColor: '#0F172A',
+  pdfHeadingBackgroundColor: '#E2E8F0',
+  invoiceNumberFormat: '{InvoiceCounter}-{AccountKey}',
   notes: ''
 };
 
@@ -83,6 +87,10 @@ export default function ProfilePage({ user, oauthUrls, onJiraDisconnect }) {
         bankState: response.profile?.bankState || '',
         bankPostalCode: response.profile?.bankPostalCode || '',
         bankCountry: response.profile?.bankCountry || 'United States',
+        pdfBackgroundColor: response.profile?.pdfBackgroundColor || '#FFFFFF',
+        pdfTextColor: response.profile?.pdfTextColor || '#0F172A',
+        pdfHeadingBackgroundColor: response.profile?.pdfHeadingBackgroundColor || '#E2E8F0',
+        invoiceNumberFormat: response.profile?.invoiceNumberFormat || '{InvoiceCounter}-{AccountKey}',
         notes: response.profile?.notes || ''
       });
       setVerifiedAt(response.profile?.verifiedAt || null);
@@ -179,6 +187,17 @@ export default function ProfilePage({ user, oauthUrls, onJiraDisconnect }) {
           </p>
         </div>
 
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            disabled={isSaving}
+            className="rounded-lg bg-[#3C50E0] px-4 py-2 text-sm font-semibold text-white hover:bg-[#3043cc] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? 'Saving...' : 'Save Profile'}
+          </button>
+          <p className="text-sm text-slate-300">{message}</p>
+        </div>
+
         <div className="grid gap-3 md:grid-cols-2">
           <input
             type="number"
@@ -201,6 +220,65 @@ export default function ProfilePage({ user, oauthUrls, onJiraDisconnect }) {
             <option value="Wire">Wire</option>
             <option value="Direct Deposit">Direct Deposit</option>
           </select>
+        </div>
+
+        <div className="rounded-xl border border-[#2D3748] bg-[#111928]/70 p-4">
+          <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-200">PDF Theme</h4>
+          <p className="mt-1 text-xs text-slate-400">
+            These colors are used for newly generated invoice PDFs and saved into each invoice snapshot.
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <label className="space-y-2 text-sm text-slate-200">
+              <span>Background Color</span>
+              <input
+                type="color"
+                name="pdfBackgroundColor"
+                value={form.pdfBackgroundColor}
+                onChange={onChange}
+                className="h-11 w-full rounded-lg border border-[#2D3748] bg-[#0F172A] px-2 py-1"
+              />
+            </label>
+            <label className="space-y-2 text-sm text-slate-200">
+              <span>Text Color</span>
+              <input
+                type="color"
+                name="pdfTextColor"
+                value={form.pdfTextColor}
+                onChange={onChange}
+                className="h-11 w-full rounded-lg border border-[#2D3748] bg-[#0F172A] px-2 py-1"
+              />
+            </label>
+            <label className="space-y-2 text-sm text-slate-200">
+              <span>Heading Background</span>
+              <input
+                type="color"
+                name="pdfHeadingBackgroundColor"
+                value={form.pdfHeadingBackgroundColor}
+                onChange={onChange}
+                className="h-11 w-full rounded-lg border border-[#2D3748] bg-[#0F172A] px-2 py-1"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[#2D3748] bg-[#111928]/70 p-4">
+          <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-fuchsia-200">Invoice Number Format</h4>
+          <p className="mt-1 text-xs text-slate-400">
+            Supported placeholders: {'{InvoiceCounter}'}, {'{AccountKey}'}, {'{AccountNumber}'}, {'{AccountName}'},{' '}
+            {'{ProjectKey}'}, {'{ProjectNumber}'}, {'{ProjectName}'}, {'{ProjectShortKey}'}, {'{DateTime}'}, {'{Date}'}, {'{Year}'},{' '}
+            {'{Month}'}, {'{Day}'}.
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Default format: <span className="font-mono text-slate-300">{'{InvoiceCounter}-{AccountKey}'}</span>
+          </p>
+          <input
+            type="text"
+            name="invoiceNumberFormat"
+            value={form.invoiceNumberFormat}
+            onChange={onChange}
+            placeholder="{InvoiceCounter}-{AccountKey}"
+            className="mt-3 w-full rounded-lg border border-[#2D3748] bg-[#0F172A] px-3 py-2 font-mono text-sm text-white"
+          />
         </div>
 
         <div className="rounded-xl border border-[#2D3748] bg-[#111928]/70 p-4">
@@ -471,7 +549,6 @@ export default function ProfilePage({ user, oauthUrls, onJiraDisconnect }) {
         >
           {isSaving ? 'Saving...' : 'Save Profile'}
         </button>
-        <p className="text-sm text-slate-300">{message}</p>
       </form>
     </div>
   );

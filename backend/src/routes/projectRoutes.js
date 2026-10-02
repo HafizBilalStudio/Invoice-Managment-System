@@ -6,7 +6,6 @@ const {
   listProjects,
   syncProjectIssues,
   syncProjectsCatalog,
-  linkProjectsToTempoAccounts,
   listProjectIssues,
   triggerSyncAllProjectIssues,
   getSyncAllProjectIssuesStatus
@@ -17,7 +16,6 @@ const router = express.Router();
 router.use(requireAuth);
 router.get('/', listProjects);
 router.post('/sync', requireSuperAdmin, requireJiraConnection, syncProjectsCatalog);
-router.post('/link-tempo-accounts', requireSuperAdmin, linkProjectsToTempoAccounts);
 router.post('/sync-issues-all', requireSuperAdmin, requireJiraConnection, triggerSyncAllProjectIssues);
 router.get('/sync-issues-all/status', getSyncAllProjectIssuesStatus);
 router.get('/:id/issues', listProjectIssues);

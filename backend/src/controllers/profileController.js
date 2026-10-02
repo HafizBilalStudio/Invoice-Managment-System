@@ -1,10 +1,13 @@
 const db = require('../config/db');
 const { getUserById } = require('../services/userService');
 const {
+  DEFAULT_INVOICE_NUMBER_FORMAT,
   deriveLast4,
   getUserProfileRow,
   mapProfileResponse,
-  nullIfBlank
+  nullIfBlank,
+  sanitizeHexColor,
+  validateInvoiceNumberFormat
 } = require('../services/profileService');
 const { listUsersForManagerFlag, setProjectManagerFlag } = require('../services/userService');
 
@@ -59,6 +62,10 @@ const updateProfile = async (req, res) => {
     bankState,
     bankPostalCode,
     bankCountry,
+    pdfBackgroundColor,
+    pdfTextColor,
+    pdfHeadingBackgroundColor,
+    invoiceNumberFormat,
     notes,
     effectiveFrom
   } = req.body || {};
@@ -83,6 +90,27 @@ const updateProfile = async (req, res) => {
       : nullIfBlank(bankAccountNumber);
   const nextBankAddressLine1 = nullIfBlank(bankAddressLine1) || nullIfBlank(bankAddress);
   const nextEffectiveFrom = nullIfBlank(effectiveFrom);
+  const nextPdfBackgroundColor = sanitizeHexColor(pdfBackgroundColor) || '#FFFFFF';
+  const nextPdfTextColor = sanitizeHexColor(pdfTextColor) || '#0F172A';
+  const nextPdfHeadingBackgroundColor = sanitizeHexColor(pdfHeadingBackgroundColor) || '#E2E8F0';
+  const invoiceNumberFormatValidation = validateInvoiceNumberFormat(invoiceNumberFormat);
+
+  if (pdfBackgroundColor !== undefined && pdfBackgroundColor !== '' && !sanitizeHexColor(pdfBackgroundColor)) {
+    return res.status(400).json({ message: 'pdfBackgroundColor must be a valid hex color like #FFFFFF' });
+  }
+  if (pdfTextColor !== undefined && pdfTextColor !== '' && !sanitizeHexColor(pdfTextColor)) {
+    return res.status(400).json({ message: 'pdfTextColor must be a valid hex color like #0F172A' });
+  }
+  if (
+    pdfHeadingBackgroundColor !== undefined &&
+    pdfHeadingBackgroundColor !== '' &&
+    !sanitizeHexColor(pdfHeadingBackgroundColor)
+  ) {
+    return res.status(400).json({ message: 'pdfHeadingBackgroundColor must be a valid hex color like #E2E8F0' });
+  }
+  if (!invoiceNumberFormatValidation.valid) {
+    return res.status(400).json({ message: invoiceNumberFormatValidation.message });
+  }
 
   await db.query(
     `INSERT INTO user_profiles
@@ -93,8 +121,9 @@ const updateProfile = async (req, res) => {
        bill_to_phone, bank_account_title, bank_routing_number, bank_account_number,
        bank_account_last4, bank_account_type, bank_name, bank_address, bank_address_line1,
        bank_address_line2, bank_city, bank_state, bank_postal_code, bank_country,
+       pdf_background_color, pdf_text_color, pdf_heading_background_color, invoice_number_format,
        is_default_payout_account, notes, effective_from)
-     VALUES (?, ?, 'USD', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+     VALUES (?, ?, 'USD', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
      ON DUPLICATE KEY UPDATE
       hourly_rate_usd = VALUES(hourly_rate_usd),
       currency = 'USD',
@@ -129,6 +158,10 @@ const updateProfile = async (req, res) => {
       bank_state = VALUES(bank_state),
       bank_postal_code = VALUES(bank_postal_code),
       bank_country = VALUES(bank_country),
+      pdf_background_color = VALUES(pdf_background_color),
+      pdf_text_color = VALUES(pdf_text_color),
+      pdf_heading_background_color = VALUES(pdf_heading_background_color),
+      invoice_number_format = VALUES(invoice_number_format),
       is_default_payout_account = VALUES(is_default_payout_account),
       notes = VALUES(notes),
       effective_from = VALUES(effective_from)`,
@@ -166,6 +199,10 @@ const updateProfile = async (req, res) => {
       nullIfBlank(bankState),
       nullIfBlank(bankPostalCode),
       nullIfBlank(bankCountry) || 'United States',
+      nextPdfBackgroundColor,
+      nextPdfTextColor,
+      nextPdfHeadingBackgroundColor,
+      invoiceNumberFormatValidation.normalized || DEFAULT_INVOICE_NUMBER_FORMAT,
       nullIfBlank(notes),
       nextEffectiveFrom
     ]
@@ -191,7 +228,11 @@ const updateProfile = async (req, res) => {
         beneficiaryName: nullIfBlank(beneficiaryName),
         beneficiaryEmail: nullIfBlank(beneficiaryEmail),
         billToName: nullIfBlank(billToName),
-        bankAccountLast4: deriveLast4(nextAccountNumber)
+        bankAccountLast4: deriveLast4(nextAccountNumber),
+        pdfBackgroundColor: nextPdfBackgroundColor,
+        pdfTextColor: nextPdfTextColor,
+        pdfHeadingBackgroundColor: nextPdfHeadingBackgroundColor,
+        invoiceNumberFormat: invoiceNumberFormatValidation.normalized || DEFAULT_INVOICE_NUMBER_FORMAT
       })
     ]
   );

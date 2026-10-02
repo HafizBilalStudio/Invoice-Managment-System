@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { invoiceApi, profileApi, timelogApi } from '../services/api';
 
 function addDays(date, days) {
@@ -66,21 +67,22 @@ export default function InvoiceCreatePage({ user }) {
   const [message, setMessage] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState(null);
-  const [projectFilter, setProjectFilter] = useState('all');
+  const [accountFilter, setAccountFilter] = useState('all');
   const [rangePreset, setRangePreset] = useState('thisWeek');
   const [viewFrom, setViewFrom] = useState('');
   const [viewTo, setViewTo] = useState('');
   const [rateUsd, setRateUsd] = useState('');
   const [creatingGroupKey, setCreatingGroupKey] = useState('');
+  const [createdInvoice, setCreatedInvoice] = useState(null);
 
-  const projectOptions = useMemo(() => {
+  const accountOptions = useMemo(() => {
     const map = new Map();
     timelogs.forEach((log) => {
-      const key = log.projectId ? `id:${log.projectId}` : `key:${log.projectKey || ''}`;
+      const key = `account:${log.accountKey || log.projectNumber || log.projectKey || ''}`;
       if (!map.has(key)) {
         map.set(key, {
           value: key,
-          label: `${log.projectKey || '-'}${log.projectName ? ` - ${log.projectName}` : ''}`
+          label: `${log.accountKey || log.projectNumber || '-'}${log.accountName ? ` - ${log.accountName}` : ''}`
         });
       }
     });
@@ -90,16 +92,16 @@ export default function InvoiceCreatePage({ user }) {
   const filteredTimelogs = useMemo(() => {
     return timelogs.filter((log) => {
       const projectMatch =
-        projectFilter === 'all' ||
-        (projectFilter.startsWith('id:') && Number(log.projectId || 0) === Number(projectFilter.replace('id:', ''))) ||
-        (projectFilter.startsWith('key:') && String(log.projectKey || '') === projectFilter.replace('key:', ''));
+        accountFilter === 'all' ||
+        (accountFilter.startsWith('account:') &&
+          String(log.accountKey || log.projectNumber || log.projectKey || '') === accountFilter.replace('account:', ''));
 
       const fromMatch = !viewFrom || String(log.workDate || '') >= viewFrom;
       const toMatch = !viewTo || String(log.workDate || '') <= viewTo;
 
       return projectMatch && fromMatch && toMatch;
     });
-  }, [timelogs, projectFilter, viewFrom, viewTo]);
+  }, [timelogs, accountFilter, viewFrom, viewTo]);
 
   const totalHours = useMemo(
     () => filteredTimelogs.reduce((sum, item) => sum + Number(item.hours || 0), 0).toFixed(2),
@@ -107,18 +109,17 @@ export default function InvoiceCreatePage({ user }) {
   );
 
   const groupedTimelogs = useMemo(() => {
-    const groups = new Map();
+      const groups = new Map();
 
-    filteredTimelogs.forEach((log) => {
-      const groupKey = log.projectId ? `id:${log.projectId}` : `key:${log.projectKey || 'unassigned'}`;
+      filteredTimelogs.forEach((log) => {
+      const groupKey = `account:${log.accountKey || log.projectNumber || log.projectKey || 'unassigned'}`;
       if (!groups.has(groupKey)) {
         groups.set(groupKey, {
           key: groupKey,
-          projectId: log.projectId || null,
-          projectKey: log.projectKey || '-',
-          projectName: log.projectName || 'Unknown Project',
-          projectNumber: log.projectNumber || '-',
-          projectAccountNumber: log.projectAccountNumber || '-',
+          accountId: log.accountId || null,
+          accountKey: log.accountKey || log.projectNumber || log.projectKey || '-',
+          accountName: log.accountName || log.projectName || 'Unknown Account',
+          accountNumber: log.accountKey || log.projectNumber || '-',
           totalHours: 0,
           rows: []
         });
@@ -141,7 +142,7 @@ export default function InvoiceCreatePage({ user }) {
           return Number(b.id || 0) - Number(a.id || 0);
         })
       }))
-      .sort((a, b) => `${a.projectKey} ${a.projectName}`.localeCompare(`${b.projectKey} ${b.projectName}`));
+      .sort((a, b) => `${a.accountKey} ${a.accountName}`.localeCompare(`${b.accountKey} ${b.accountName}`));
   }, [filteredTimelogs]);
 
   const loadTimelogs = async () => {
@@ -197,7 +198,7 @@ export default function InvoiceCreatePage({ user }) {
 
           if (status.status === 'COMPLETED') {
             setMessage(
-              `Timelog async sync completed. Mode: ${status.mode || '-'}, Synced: ${status.syncedCount}, Inserted: ${status.inserted}, Updated: ${status.updated}, Unchanged: ${status.unchanged}, Deleted marked: ${status.deletedMarked || 0}, Skipped(no project ref): ${status.skippedNoProjectReference}, Linked projects: ${status.linkedProjects}, Unlinked: ${status.unlinkedProjects}, Hours: ${status.totalHours}.`
+              `Timelog async sync completed. Mode: ${status.mode || '-'}, Synced: ${status.syncedCount}, Inserted: ${status.inserted}, Updated: ${status.updated}, Unchanged: ${status.unchanged}, Deleted marked: ${status.deletedMarked || 0}, Skipped(no tempo account ref): ${status.skippedNoProjectReference}, Linked accounts: ${status.linkedProjects}, Unlinked: ${status.unlinkedProjects}, Hours: ${status.totalHours}.`
             );
           } else {
             setMessage(
@@ -282,24 +283,24 @@ export default function InvoiceCreatePage({ user }) {
     const endDate = viewTo || groupDates[groupDates.length - 1];
 
     if (!startDate || !endDate) {
-      setMessage('Could not determine invoice date range from selected project timelogs.');
+      setMessage('Could not determine invoice date range from selected account timelogs.');
       return;
     }
 
     setCreatingGroupKey(group.key);
-    setMessage(`Creating invoice for ${group.projectKey || group.projectName}...`);
+    setMessage(`Creating invoice for ${group.accountKey || group.accountName}...`);
 
     try {
       const invoice = await invoiceApi.syncCreate({
-        projectId: group.projectId || null,
-        projectKey: group.projectId ? null : group.projectKey,
+        accountKey: group.accountKey,
         startDate,
         endDate,
         rate: resolvedRate,
         timesheetEntryIds: group.rows.map((row) => row.id)
       });
 
-      setMessage(`Invoice created: ${invoice.invoiceNumber}`);
+      setMessage('');
+      setCreatedInvoice(invoice);
     } catch (error) {
       const backendMessage = error?.response?.data?.message || 'Failed to create invoice';
       const invoiceNumber = error?.response?.data?.invoiceNumber;
@@ -346,7 +347,7 @@ export default function InvoiceCreatePage({ user }) {
           <p className="text-xs text-slate-400">
             Job status: {syncStatus.status || 'UNKNOWN'} | Mode: {syncStatus.mode || '-'} | Synced:{' '}
             {syncStatus.syncedCount || 0} | Inserted: {syncStatus.inserted || 0} | Updated: {syncStatus.updated || 0}
-            {' '}| Deleted: {syncStatus.deletedMarked || 0} | Skipped: {syncStatus.skippedNoProjectReference || 0}
+            {' '}| Deleted: {syncStatus.deletedMarked || 0} | Skipped(no account): {syncStatus.skippedNoProjectReference || 0}
           </p>
         )}
       </form>
@@ -354,33 +355,30 @@ export default function InvoiceCreatePage({ user }) {
       <div className="rounded-xl border border-[#2D3748] bg-[#1A2233] p-4">
         <h3 className="text-base font-semibold text-white">Synced Timelogs</h3>
         <p className="mt-1 text-sm text-slate-400">
-          Projects: {groupedTimelogs.length} | Rows: {filteredTimelogs.length} / {timelogs.length} | Total Hours:{' '}
+          Accounts: {groupedTimelogs.length} | Rows: {filteredTimelogs.length} / {timelogs.length} | Total Hours:{' '}
           {totalHours}
         </p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            value={rateUsd}
-            onChange={(event) => setRateUsd(event.target.value)}
-            placeholder="Invoice Rate (USD)"
-            className="rounded-lg border border-[#2D3748] bg-[#111928] px-3 py-2 text-sm text-white"
-          />
+          <div className="rounded-lg border border-[#2D3748] bg-[#111928] px-3 py-2">
+            <p className="text-xs uppercase tracking-wide text-slate-400">Hourly Rate (USD)</p>
+            <p className="mt-1 text-sm font-semibold text-white">
+              {rateUsd && Number(rateUsd) > 0 ? `$${Number(rateUsd).toFixed(2)}` : 'Not set in profile'}
+            </p>
+          </div>
           <div className="md:col-span-3 flex items-center text-xs text-slate-400">
-            One invoice is created per project using the currently visible date range.
+            One invoice is created per Tempo account using the currently visible date range. Update the hourly rate from your profile page.
           </div>
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-4">
           <select
-            value={projectFilter}
-            onChange={(event) => setProjectFilter(event.target.value)}
+            value={accountFilter}
+            onChange={(event) => setAccountFilter(event.target.value)}
             className="rounded-lg border border-[#2D3748] bg-[#111928] px-3 py-2 text-sm text-white"
           >
-            <option value="all">All Projects</option>
-            {projectOptions.map((option) => (
+            <option value="all">All Accounts</option>
+            {accountOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -426,15 +424,14 @@ export default function InvoiceCreatePage({ user }) {
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#3B82F6]/40 bg-[#0F1B33] px-4 py-3">
                 <div>
                   <p className="text-sm font-bold text-[#E2E8F0]">
-                    {group.projectKey} {group.projectName ? `- ${group.projectName}` : ''}
+                    {group.accountKey} {group.accountName ? `- ${group.accountName}` : ''}
                   </p>
                   <p className="text-xs text-[#93C5FD]">
-                    Project Number: {group.projectNumber} | Account: {group.projectAccountNumber} | Logs:{' '}
-                    {group.rows.length}
+                    Account Number: {group.accountNumber} | Logs: {group.rows.length}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <p className="text-sm font-bold text-[#34D399]">Project Hours: {group.totalHours}</p>
+                  <p className="text-sm font-bold text-[#34D399]">Account Hours: {group.totalHours}</p>
                   <button
                     type="button"
                     onClick={() => createInvoiceForGroup(group)}
@@ -476,6 +473,49 @@ export default function InvoiceCreatePage({ user }) {
           )}
         </div>
       </div>
+
+      {createdInvoice ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-[#2D3748] bg-[#111928]">
+            <div className="bg-emerald-600 px-5 py-3">
+              <h3 className="text-lg font-semibold text-white">Invoice Generated</h3>
+            </div>
+            <div className="p-5">
+              <table className="w-full overflow-hidden rounded-lg border border-[#2D3748] text-sm">
+                <tbody className="divide-y divide-[#2D3748]">
+                  <tr>
+                    <th className="w-2/5 bg-[#1A2233] px-3 py-2 text-left font-medium text-slate-400">Invoice</th>
+                    <td className="px-3 py-2 font-medium text-white">{createdInvoice.invoiceNumber}</td>
+                  </tr>
+                  <tr>
+                    <th className="w-2/5 bg-[#1A2233] px-3 py-2 text-left font-medium text-slate-400">Project</th>
+                    <td className="px-3 py-2 font-medium text-white">{createdInvoice.projectName || '-'}</td>
+                  </tr>
+                  <tr>
+                    <th className="w-2/5 bg-[#1A2233] px-3 py-2 text-left font-medium text-slate-400">Total Hours</th>
+                    <td className="px-3 py-2 font-medium text-white">{createdInvoice.totalHours}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCreatedInvoice(null)}
+                  className="rounded-lg border border-[#2D3748] bg-[#1A2233] px-3 py-2 text-sm text-white hover:bg-[#243041]"
+                >
+                  Close
+                </button>
+                <Link
+                  to={`/invoices/${createdInvoice.id}`}
+                  className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+                >
+                  View Invoice
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,5 +1,22 @@
 const db = require('../config/db');
 
+const DEFAULT_INVOICE_NUMBER_FORMAT = '{InvoiceCounter}-{AccountKey}';
+const SUPPORTED_INVOICE_NUMBER_PLACEHOLDERS = [
+  'InvoiceCounter',
+  'AccountKey',
+  'AccountNumber',
+  'AccountName',
+  'ProjectKey',
+  'ProjectNumber',
+  'ProjectName',
+  'ProjectShortKey',
+  'DateTime',
+  'Date',
+  'Year',
+  'Month',
+  'Day'
+];
+
 function nullIfBlank(value) {
   if (value === undefined || value === null) {
     return null;
@@ -18,6 +35,16 @@ function deriveLast4(value) {
   return normalized.slice(-4);
 }
 
+function sanitizeHexColor(value) {
+  const normalized = nullIfBlank(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const upper = normalized.toUpperCase();
+  return /^#[0-9A-F]{6}$/.test(upper) ? upper : null;
+}
+
 async function getUserProfileRow(userId, executor = db) {
   const [rows] = await executor.query(
     `SELECT hourly_rate_usd, currency, payment_method,
@@ -28,7 +55,8 @@ async function getUserProfileRow(userId, executor = db) {
             bank_account_title, bank_routing_number,
             bank_account_number, bank_account_last4, bank_account_type, bank_name,
             bank_address, bank_address_line1, bank_address_line2, bank_city,
-            bank_state, bank_postal_code, bank_country, is_default_payout_account,
+            bank_state, bank_postal_code, bank_country, pdf_background_color,
+            pdf_text_color, pdf_heading_background_color, invoice_number_format, is_default_payout_account,
             verified_at, notes, effective_from, created_at, updated_at
      FROM user_profiles
      WHERE user_id = ?
@@ -79,6 +107,10 @@ function mapProfileResponse(user, profileRow) {
       bankState: profileRow?.bank_state || '',
       bankPostalCode: profileRow?.bank_postal_code || '',
       bankCountry: profileRow?.bank_country || 'United States',
+      pdfBackgroundColor: profileRow?.pdf_background_color || '#FFFFFF',
+      pdfTextColor: profileRow?.pdf_text_color || '#0F172A',
+      pdfHeadingBackgroundColor: profileRow?.pdf_heading_background_color || '#E2E8F0',
+      invoiceNumberFormat: profileRow?.invoice_number_format || DEFAULT_INVOICE_NUMBER_FORMAT,
       isDefaultPayoutAccount: profileRow?.is_default_payout_account !== 0,
       verifiedAt: profileRow?.verified_at || null,
       notes: profileRow?.notes || '',
@@ -124,14 +156,45 @@ function buildInvoiceSnapshot({ user, profileRow }) {
     bankCity: profileRow?.bank_city || null,
     bankState: profileRow?.bank_state || null,
     bankPostalCode: profileRow?.bank_postal_code || null,
-    bankCountry: profileRow?.bank_country || null
+    bankCountry: profileRow?.bank_country || null,
+    pdfBackgroundColor: sanitizeHexColor(profileRow?.pdf_background_color) || '#FFFFFF',
+    pdfTextColor: sanitizeHexColor(profileRow?.pdf_text_color) || '#0F172A',
+    pdfHeadingBackgroundColor: sanitizeHexColor(profileRow?.pdf_heading_background_color) || '#E2E8F0'
   };
 }
 
+function validateInvoiceNumberFormat(value) {
+  const normalized = nullIfBlank(value);
+  if (!normalized) {
+    return { valid: true, normalized: DEFAULT_INVOICE_NUMBER_FORMAT };
+  }
+
+  if (normalized.length > 255) {
+    return { valid: false, message: 'invoiceNumberFormat must be 255 characters or fewer' };
+  }
+
+  const placeholders = normalized.match(/\{[^}]+\}/g) || [];
+  for (const placeholder of placeholders) {
+    const key = placeholder.slice(1, -1).trim();
+    if (!SUPPORTED_INVOICE_NUMBER_PLACEHOLDERS.includes(key)) {
+      return {
+        valid: false,
+        message: `Unsupported invoice number placeholder: ${placeholder}`
+      };
+    }
+  }
+
+  return { valid: true, normalized };
+}
+
 module.exports = {
+  DEFAULT_INVOICE_NUMBER_FORMAT,
+  SUPPORTED_INVOICE_NUMBER_PLACEHOLDERS,
   buildInvoiceSnapshot,
   deriveLast4,
   getUserProfileRow,
   mapProfileResponse,
-  nullIfBlank
+  nullIfBlank,
+  sanitizeHexColor,
+  validateInvoiceNumberFormat
 };

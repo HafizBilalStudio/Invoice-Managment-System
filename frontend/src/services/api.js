@@ -63,10 +63,6 @@ export const projectsApi = {
     const { data } = await api.post('/projects/sync');
     return data;
   },
-  linkTempoAccounts: async () => {
-    const { data } = await api.post('/projects/link-tempo-accounts');
-    return data;
-  },
   syncAllIssues: async () => {
     const { data } = await api.post('/projects/sync-issues-all');
     return data;
@@ -132,6 +128,10 @@ export const invoiceApi = {
     const { data } = await api.delete(`/invoices/${id}`);
     return data;
   },
+  cancel: async (id) => {
+    const { data } = await api.post(`/invoices/${id}/cancel`);
+    return data;
+  },
   updateStatus: async (id, payload) => {
     const { data } = await api.patch(`/invoices/${id}/status`, payload);
     return data.invoice;
@@ -182,10 +182,6 @@ export const workflowApi = {
 export const syncLogsApi = {
   list: async (params = {}) => {
     const { data } = await api.get('/sync-logs', { params });
-    return data;
-  },
-  unmatchedProjectLinks: async (params = {}) => {
-    const { data } = await api.get('/sync-logs/unmatched-project-links', { params });
     return data;
   }
 };

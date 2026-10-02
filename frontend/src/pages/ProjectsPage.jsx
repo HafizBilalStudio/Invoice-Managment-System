@@ -7,7 +7,6 @@ export default function ProjectsPage({ user }) {
   const [message, setMessage] = useState('');
   const [syncingProjectId, setSyncingProjectId] = useState(null);
   const [syncingProjects, setSyncingProjects] = useState(false);
-  const [linkingTempoAccounts, setLinkingTempoAccounts] = useState(false);
   const [syncingAllIssues, setSyncingAllIssues] = useState(false);
   const [allIssuesStatus, setAllIssuesStatus] = useState(null);
   const [search, setSearch] = useState('');
@@ -54,14 +53,9 @@ export default function ProjectsPage({ user }) {
   }, [syncingAllIssues]);
 
   const totals = useMemo(() => {
-    const linkedCount = projects.filter((p) => p.userTimelogCount > 0).length;
-    const totalTimelogs = projects.reduce((sum, p) => sum + Number(p.userTimelogCount || 0), 0);
-    const totalHours = projects.reduce((sum, p) => sum + Number(p.userTotalHours || 0), 0);
-
     return {
-      linkedCount,
-      totalTimelogs,
-      totalHours: totalHours.toFixed(2)
+      totalProjects: projects.length,
+      totalIssues: projects.reduce((sum, p) => sum + Number(p.jiraIssueCount || 0), 0)
     };
   }, [projects]);
 
@@ -146,28 +140,6 @@ export default function ProjectsPage({ user }) {
     }
   };
 
-  const linkTempoAccounts = async () => {
-    setLinkingTempoAccounts(true);
-    setMessage('Linking existing Jira projects with existing Tempo accounts...');
-
-    try {
-      const result = await projectsApi.linkTempoAccounts();
-      await loadProjects();
-      setMessage(
-        `Tempo account linking completed. Processed: ${result.processedProjects}, linked: ${result.linkedProjects}, unchanged: ${result.unchangedProjects}, no match: ${result.skippedNoTempoMatch}.`
-      );
-    } catch (error) {
-      const backendMessage = error?.response?.data?.message || 'Failed to link projects with Tempo accounts';
-      const backendError = error?.response?.data?.error;
-      const requestId = error?.response?.data?.requestId;
-      setMessage(
-        `${backendMessage}${backendError ? ` | ${backendError}` : ''}${requestId ? ` | requestId: ${requestId}` : ''}`
-      );
-    } finally {
-      setLinkingTempoAccounts(false);
-    }
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -184,14 +156,6 @@ export default function ProjectsPage({ user }) {
             </button>
             <button
               type="button"
-              onClick={linkTempoAccounts}
-              disabled={linkingTempoAccounts}
-              className="rounded-md bg-[#0EA5E9] px-3 py-2 text-xs font-semibold text-white hover:bg-[#0284c7] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {linkingTempoAccounts ? 'Linking Tempo Accounts...' : 'Link Tempo Accounts'}
-            </button>
-            <button
-              type="button"
               onClick={syncAllProjectIssues}
               disabled={syncingAllIssues || !user?.jiraConnected}
               className="rounded-md bg-[#F59E0B] px-3 py-2 text-xs font-semibold text-white hover:bg-[#d88908] disabled:cursor-not-allowed disabled:opacity-60"
@@ -202,7 +166,7 @@ export default function ProjectsPage({ user }) {
         ) : null}
       </div>
       <p className="text-sm text-slate-400">
-        Project catalog with linked timelog counts and hours for your account only.
+        Jira project catalog and synced issue counts. Timelog invoicing now groups by Tempo accounts instead of Jira projects.
       </p>
       {user?.isSuperAdmin && !user?.jiraConnected ? (
         <p className="text-sm text-amber-200">Connect Jira to run project and issue sync actions.</p>
@@ -216,18 +180,14 @@ export default function ProjectsPage({ user }) {
         </p>
       )}
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2">
         <div className="rounded-lg border border-[#2D3748] bg-[#1A2233] p-3">
           <p className="text-xs text-slate-400">Projects in Catalog</p>
-          <p className="mt-1 text-xl font-semibold text-white">{projects.length}</p>
+          <p className="mt-1 text-xl font-semibold text-white">{totals.totalProjects}</p>
         </div>
         <div className="rounded-lg border border-[#2D3748] bg-[#1A2233] p-3">
-          <p className="text-xs text-slate-400">Projects with Your Timelogs</p>
-          <p className="mt-1 text-xl font-semibold text-white">{totals.linkedCount}</p>
-        </div>
-        <div className="rounded-lg border border-[#2D3748] bg-[#1A2233] p-3">
-          <p className="text-xs text-slate-400">Your Total Linked Hours</p>
-          <p className="mt-1 text-xl font-semibold text-white">{totals.totalHours}</p>
+          <p className="text-xs text-slate-400">Total Jira Issues</p>
+          <p className="mt-1 text-xl font-semibold text-white">{totals.totalIssues}</p>
         </div>
       </div>
 
@@ -249,8 +209,6 @@ export default function ProjectsPage({ user }) {
               <th className="px-4 py-3">Project Number</th>
               <th className="px-4 py-3">Account Number</th>
               <th className="px-4 py-3">Jira Issues</th>
-              <th className="px-4 py-3">Your Timelog Count</th>
-              <th className="px-4 py-3">Your Hours</th>
               <th className="px-4 py-3">Issues</th>
               {user?.isSuperAdmin ? <th className="px-4 py-3">Issue Sync</th> : null}
             </tr>
@@ -263,8 +221,6 @@ export default function ProjectsPage({ user }) {
                 <td className="px-4 py-3">{project.projectNumber || '-'}</td>
                 <td className="px-4 py-3">{project.projectAccountNumber || '-'}</td>
                 <td className="px-4 py-3">{project.jiraIssueCount || 0}</td>
-                <td className="px-4 py-3">{project.userTimelogCount}</td>
-                <td className="px-4 py-3">{project.userTotalHours}</td>
                 <td className="px-4 py-3">
                   <Link
                     to={`/projects/${project.id}/issues`}

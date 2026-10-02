@@ -16,7 +16,6 @@ import JiraUsersPage from './pages/JiraUsersPage';
 import ProjectManagersPage from './pages/ProjectManagersPage';
 import ApprovalWorkflowPage from './pages/ApprovalWorkflowPage';
 import SyncLogsPage from './pages/SyncLogsPage';
-import UnmatchedProjectLinksPage from './pages/UnmatchedProjectLinksPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import { authApi } from './services/api';
 
@@ -97,7 +96,7 @@ export default function App() {
         />
         <Route
           path="invoices/:invoiceId"
-          element={<InvoiceDetailPage />}
+          element={<InvoiceDetailPage user={user} />}
         />
         <Route
           path="projects"
@@ -126,10 +125,6 @@ export default function App() {
         <Route
           path="sync-logs"
           element={<SyncLogsPage user={user} />}
-        />
-        <Route
-          path="unmatched-project-links"
-          element={<UnmatchedProjectLinksPage user={user} />}
         />
         <Route
           path="approvals"

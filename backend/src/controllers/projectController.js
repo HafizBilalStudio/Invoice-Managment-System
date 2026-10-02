@@ -284,19 +284,12 @@ const listProjects = async (req, res) => {
               p.project_number,
               p.project_account_number,
               p.created_at,
-              COUNT(DISTINCT ji.id) AS jira_issue_count,
-              COUNT(te.id) AS user_timelog_count,
-              COALESCE(SUM(te.hours), 0) AS user_total_hours
+              COUNT(DISTINCT ji.id) AS jira_issue_count
        FROM projects p
        LEFT JOIN jira_issues ji
          ON ji.project_id = p.id
-       LEFT JOIN timesheet_entries te
-         ON te.project_id = p.id
-        AND te.contractor_user_id = ?
-        AND te.source_deleted_at IS NULL
        GROUP BY p.id, p.project_key, p.project_name, p.project_number, p.project_account_number, p.created_at
-       ORDER BY user_total_hours DESC, p.project_name ASC`,
-      [userId]
+       ORDER BY p.project_name ASC`
     );
 
     const projects = rows.map((row) => ({
@@ -306,9 +299,7 @@ const listProjects = async (req, res) => {
       projectNumber: row.project_number,
       projectAccountNumber: row.project_account_number,
       createdAt: row.created_at,
-      jiraIssueCount: Number(row.jira_issue_count || 0),
-      userTimelogCount: Number(row.user_timelog_count || 0),
-      userTotalHours: Number(Number(row.user_total_hours || 0).toFixed(2))
+      jiraIssueCount: Number(row.jira_issue_count || 0)
     }));
 
     logger.info('Project list: response ready', {
@@ -522,227 +513,6 @@ const syncProjectsCatalog = async (req, res) => {
   }
 };
 
-const linkProjectsToTempoAccounts = async (req, res) => {
-  const requestId = `project-tempo-link-${Date.now()}`;
-  let jobLogId = null;
-
-  try {
-    const userId = req.user?.id;
-    jobLogId = await startSyncJobLog({
-      jobType: 'PROJECT_TEMPO_ACCOUNT_LINK',
-      triggerSource: 'manual',
-      requestId,
-      userId
-    });
-
-    logger.info('Project tempo link: started', {
-      requestId,
-      userId
-    });
-
-    const [rows] = await db.query(
-      `SELECT p.id AS project_id,
-              p.project_key,
-              p.project_account_number,
-              latest_te.project_number AS latest_project_number,
-              latest_te.project_account_number AS latest_project_account_number,
-              latest_te.work_date AS latest_work_date,
-              latest_te.updated_at AS latest_updated_at,
-              latest_te.id AS latest_timesheet_entry_id,
-              ta.account_key
-       FROM projects p
-       LEFT JOIN (
-         SELECT ranked.project_id,
-                ranked.project_number,
-                ranked.project_account_number,
-                ranked.work_date,
-                ranked.updated_at,
-                ranked.id
-         FROM (
-           SELECT te.project_id,
-                  te.project_number,
-                  te.project_account_number,
-                  te.work_date,
-                  te.updated_at,
-                  te.id,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY te.project_id
-                    ORDER BY te.work_date DESC, te.updated_at DESC, te.id DESC
-                  ) AS rn
-           FROM timesheet_entries te
-           WHERE te.project_id IS NOT NULL
-             AND te.source_deleted_at IS NULL
-         ) ranked
-         WHERE ranked.rn = 1
-       ) latest_te
-         ON latest_te.project_id = p.id
-       LEFT JOIN tempo_accounts ta
-         ON ta.account_key = COALESCE(
-           NULLIF(latest_te.project_account_number, ''),
-           NULLIF(latest_te.project_number, '')
-         )
-       ORDER BY p.id ASC`
-    );
-
-    let processedProjects = 0;
-    let linkedProjects = 0;
-    let unchangedProjects = 0;
-    let skippedNoTempoMatch = 0;
-    const unmatchedProjects = [];
-    const linkedProjectDetails = [];
-    const unchangedProjectDetails = [];
-
-    for (const row of rows) {
-      processedProjects += 1;
-      const attemptedProjectAccountNumber = row.latest_project_account_number || null;
-      const attemptedProjectNumber = row.latest_project_number || null;
-      const latestWorkDate = row.latest_work_date || null;
-      const latestUpdatedAt = row.latest_updated_at || null;
-      const latestTimesheetEntryId = row.latest_timesheet_entry_id ? Number(row.latest_timesheet_entry_id) : null;
-      const matchedTempoAccountKey = row.account_key || null;
-      const selectedAccountKey = matchedTempoAccountKey || attemptedProjectAccountNumber || attemptedProjectNumber || null;
-
-      if (!selectedAccountKey) {
-        skippedNoTempoMatch += 1;
-        const details = {
-          projectId: Number(row.project_id),
-          projectKey: row.project_key,
-          existingProjectAccountNumber: row.project_account_number || null,
-          attemptedProjectAccountNumber,
-          attemptedProjectNumber,
-          latestWorkDate,
-          latestUpdatedAt,
-          latestTimesheetEntryId,
-          matchedTempoAccountKey,
-          reason: 'No non-deleted timelog with project_number or project_account_number was available for this project'
-        };
-        unmatchedProjects.push(details);
-        logger.warn('Project tempo link: skipped project, no latest timelog-derived values available', {
-          requestId,
-          ...details
-        });
-        continue;
-      }
-
-      if (String(row.project_account_number || '') === String(selectedAccountKey)) {
-        unchangedProjects += 1;
-        unchangedProjectDetails.push({
-          projectId: Number(row.project_id),
-          projectKey: row.project_key,
-          existingProjectAccountNumber: row.project_account_number || null,
-          attemptedProjectAccountNumber,
-          attemptedProjectNumber,
-          latestWorkDate,
-          latestUpdatedAt,
-          latestTimesheetEntryId,
-          matchedTempoAccountKey,
-          selectedAccountKey
-        });
-        continue;
-      }
-
-      await db.query(
-        'UPDATE projects SET project_account_number = ? WHERE id = ?',
-        [selectedAccountKey, Number(row.project_id)]
-      );
-      linkedProjects += 1;
-      linkedProjectDetails.push({
-        projectId: Number(row.project_id),
-        projectKey: row.project_key,
-        previousProjectAccountNumber: row.project_account_number || null,
-        attemptedProjectAccountNumber,
-        attemptedProjectNumber,
-        latestWorkDate,
-        latestUpdatedAt,
-        latestTimesheetEntryId,
-        matchedTempoAccountKey,
-        selectedAccountKey
-      });
-      logger.info('Project tempo link: linked project account number', {
-        requestId,
-        projectId: Number(row.project_id),
-        projectKey: row.project_key,
-        previousProjectAccountNumber: row.project_account_number || null,
-        attemptedProjectAccountNumber,
-        attemptedProjectNumber,
-        matchedTempoAccountKey,
-        selectedAccountKey
-      });
-    }
-
-    await db.query(
-      'INSERT INTO audit_logs (user_id, action, metadata) VALUES (?, ?, ?)',
-      [
-        userId,
-        'PROJECTS_LINKED_TO_TEMPO_ACCOUNTS',
-        JSON.stringify({
-          requestId,
-          processedProjects,
-          linkedProjects,
-          unchangedProjects,
-          skippedNoTempoMatch
-        })
-      ]
-    );
-
-    await completeSyncJobLog({
-      id: jobLogId,
-      summary: {
-        foundProjects: processedProjects,
-        updatedProjects: linkedProjects,
-        unchangedProjects,
-        skippedNoTempoMatch
-      },
-      details: {
-        requestId,
-        unmatchedProjects,
-        linkedProjectDetails,
-        unchangedProjectDetails
-      }
-    });
-
-    logger.info('Project tempo link: completed', {
-      requestId,
-      userId,
-      processedProjects,
-      linkedProjects,
-      unchangedProjects,
-      skippedNoTempoMatch,
-      unmatchedProjects: unmatchedProjects.length
-    });
-
-    return res.json({
-      requestId,
-      processedProjects,
-      linkedProjects,
-      unchangedProjects,
-      skippedNoTempoMatch,
-      unmatchedProjects
-    });
-  } catch (error) {
-    if (jobLogId) {
-      await failSyncJobLog({
-        id: jobLogId,
-        details: { requestId },
-        errorMessage: error.message
-      });
-    }
-
-    logger.error('Project tempo link: failed', {
-      requestId,
-      userId: req.user?.id,
-      message: error.message,
-      stack: error.stack
-    });
-
-    return res.status(500).json({
-      message: 'Failed to link projects with Tempo accounts',
-      error: error.message,
-      requestId
-    });
-  }
-};
-
 const listProjectIssues = async (req, res) => {
   const requestId = `project-issues-list-${Date.now()}`;
 
@@ -861,7 +631,6 @@ module.exports = {
   listProjects,
   syncProjectIssues,
   syncProjectsCatalog,
-  linkProjectsToTempoAccounts,
   listProjectIssues,
   triggerSyncAllProjectIssues,
   getSyncAllProjectIssuesStatus,

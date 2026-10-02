@@ -20,12 +20,13 @@ export default function InvoicesPage() {
   const [approvers, setApprovers] = useState([]);
   const [message, setMessage] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [projectFilter, setProjectFilter] = useState('all');
+  const [accountFilter, setAccountFilter] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [regeneratingId, setRegeneratingId] = useState(null);
   const [submittingId, setSubmittingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [cancellingId, setCancellingId] = useState(null);
   const [submitTargetInvoiceId, setSubmitTargetInvoiceId] = useState(null);
   const [selectedApproverId, setSelectedApproverId] = useState('');
 
@@ -48,7 +49,7 @@ export default function InvoicesPage() {
       .catch(() => setApprovers([]));
   }, []);
 
-  const projectOptions = useMemo(() => {
+  const accountOptions = useMemo(() => {
     const map = new Map();
     invoices.forEach((invoice) => {
       const key = invoice.projectKey || invoice.projectName || 'Unknown';
@@ -66,12 +67,12 @@ export default function InvoicesPage() {
     return invoices.filter((invoice) => {
       const statusMatch = statusFilter === 'all' || invoice.statusCode === statusFilter;
       const projectValue = invoice.projectKey || invoice.projectName || 'Unknown';
-      const projectMatch = projectFilter === 'all' || projectValue === projectFilter;
+      const projectMatch = accountFilter === 'all' || projectValue === accountFilter;
       const fromMatch = !dateFrom || String(invoice.startDate || '') >= dateFrom;
       const toMatch = !dateTo || String(invoice.endDate || '') <= dateTo;
       return statusMatch && projectMatch && fromMatch && toMatch;
     });
-  }, [invoices, statusFilter, projectFilter, dateFrom, dateTo]);
+  }, [invoices, statusFilter, accountFilter, dateFrom, dateTo]);
 
   const regeneratePdf = async (invoiceId) => {
     setRegeneratingId(invoiceId);
@@ -124,12 +125,33 @@ export default function InvoicesPage() {
     }
   };
 
+  const cancelInvoice = async (invoiceId, invoiceNumber) => {
+    const confirmed = window.confirm(
+      `Cancel submitted invoice ${invoiceNumber}? It will remain in history, exit approval flow, and its timelogs can be reused for a new invoice.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setCancellingId(invoiceId);
+    setMessage('Cancelling invoice...');
+    try {
+      await invoiceApi.cancel(invoiceId);
+      await loadInvoices();
+      setMessage('Invoice cancelled successfully.');
+    } catch (error) {
+      setMessage(error?.response?.data?.message || 'Failed to cancel invoice');
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold text-white">My Invoices</h2>
         <p className="mt-1 text-sm text-slate-400">
-          View the invoices you created, filter them, and open or download the generated PDF.
+          View the invoices you created by Tempo account, filter them, and open or download the generated PDF.
         </p>
       </div>
 
@@ -144,16 +166,17 @@ export default function InvoicesPage() {
           <option value="PENDING_PM">Pending Approval</option>
           <option value="APPROVED_PM">Approved</option>
           <option value="REJECTED_PM">Rejected</option>
+          <option value="CANCELLED">Cancelled</option>
           <option value="PAID">Paid</option>
         </select>
 
         <select
-          value={projectFilter}
-          onChange={(event) => setProjectFilter(event.target.value)}
+          value={accountFilter}
+          onChange={(event) => setAccountFilter(event.target.value)}
           className="rounded-lg border border-[#2D3748] bg-[#1A2233] px-3 py-2 text-sm text-white"
         >
-          <option value="all">All Projects</option>
-          {projectOptions.map((option) => (
+          <option value="all">All Accounts</option>
+          {accountOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
@@ -186,7 +209,7 @@ export default function InvoicesPage() {
             <thead className="bg-[#111928] text-left text-slate-300">
               <tr>
                 <th className="px-4 py-3">Invoice #</th>
-                <th className="px-4 py-3">Project</th>
+                <th className="px-4 py-3">Account</th>
                 <th className="px-4 py-3">Period</th>
                 <th className="px-4 py-3">Hours</th>
                 <th className="px-4 py-3">Amount</th>
@@ -198,6 +221,8 @@ export default function InvoicesPage() {
             <tbody>
               {filteredInvoices.map((invoice) => {
                 const pdfUrl = invoiceApi.pdfUrl(invoice.pdfPath);
+                const canCancelInvoice =
+                  !['DRAFT', 'PAID', 'CANCELLED'].includes(String(invoice.statusCode || '').toUpperCase());
                 return (
                   <tr key={invoice.id} className="border-t border-[#2D3748] text-slate-200">
                     <td className="px-4 py-3 font-semibold text-white">{invoice.invoiceNumber}</td>
@@ -269,6 +294,16 @@ export default function InvoicesPage() {
                               {deletingId === invoice.id ? 'Deleting...' : 'Delete'}
                             </button>
                           </>
+                        ) : null}
+                        {canCancelInvoice ? (
+                          <button
+                            type="button"
+                            onClick={() => cancelInvoice(invoice.id, invoice.invoiceNumber)}
+                            disabled={cancellingId === invoice.id}
+                            className="rounded-lg border border-orange-500/40 bg-orange-500/10 px-3 py-1.5 text-xs font-semibold text-orange-200 hover:bg-orange-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {cancellingId === invoice.id ? 'Cancelling...' : 'Cancel Invoice'}
+                          </button>
                         ) : null}
                       </div>
                     </td>

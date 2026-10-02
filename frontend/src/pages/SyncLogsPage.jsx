@@ -152,7 +152,7 @@ export default function SyncLogsPage({ user }) {
 
     skippedProjectSamples.forEach((item) => {
       rows.push([
-        'PROJECT_CHAIN',
+        'TEMPO_ACCOUNT',
         item.externalEntryId || '',
         item.issueKey || '',
         item.projectNumber || '',
@@ -397,19 +397,19 @@ export default function SyncLogsPage({ user }) {
                       <p className="mt-1 text-lg font-semibold text-white">{selectedSummary.inserted ?? 0}</p>
                     </div>
                     <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-                      <p className="text-xs uppercase tracking-wide text-amber-300">Skipped Project Chain</p>
+                      <p className="text-xs uppercase tracking-wide text-amber-300">Skipped Tempo Account Match</p>
                       <p className="mt-1 text-lg font-semibold text-white">{selectedSummary.skippedNoProjectReference ?? 0}</p>
                     </div>
                     <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3">
-                      <p className="text-xs uppercase tracking-wide text-sky-300">Skipped Author Mapping</p>
-                      <p className="mt-1 text-lg font-semibold text-white">{selectedSummary.skippedNoAuthorUser ?? 0}</p>
+                      <p className="text-xs uppercase tracking-wide text-sky-300">Unmapped Authors</p>
+                      <p className="mt-1 text-lg font-semibold text-white">{selectedSummary.unmappedAuthorUserCount ?? 0}</p>
                     </div>
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
                       <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                        Project Chain Skip Reasons
+                        Tempo Account Skip Reasons
                       </p>
                       <div className="overflow-hidden rounded-md border border-[#2D3748] bg-[#0F172A]">
                         {skippedProjectReasonCounts.length > 0 ? (
@@ -480,7 +480,7 @@ export default function SyncLogsPage({ user }) {
 
                     <div>
                       <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                        Sample Skipped Entries: Author Mapping
+                        Sample Entries: Unmapped Authors
                       </p>
                       <div className="rounded-md border border-[#2D3748] bg-[#0F172A] p-4">
                         {skippedAuthorSamples.length > 0 ? (
@@ -495,7 +495,7 @@ export default function SyncLogsPage({ user }) {
                             ))}
                           </div>
                         ) : (
-                          <p className="text-xs text-slate-400">No sample author-mapping skips recorded.</p>
+                          <p className="text-xs text-slate-400">No unmapped-author samples recorded.</p>
                         )}
                       </div>
                     </div>

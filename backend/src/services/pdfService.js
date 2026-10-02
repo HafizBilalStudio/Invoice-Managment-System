@@ -49,11 +49,13 @@ function currency(value) {
 function drawLabelValue(doc, x, y, label, value, options = {}) {
   const labelWidth = options.labelWidth || 95;
   const valueWidth = options.valueWidth || 140;
+  const labelColor = options.labelColor || '#475569';
+  const valueColor = options.valueColor || '#0f172a';
 
-  doc.font('Helvetica-Bold').fontSize(9).fillColor('#475569').text(label, x, y, {
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(labelColor).text(label, x, y, {
     width: labelWidth
   });
-  doc.font('Helvetica').fontSize(10).fillColor('#0f172a').text(value || '-', x + labelWidth, y, {
+  doc.font('Helvetica').fontSize(10).fillColor(valueColor).text(value || '-', x + labelWidth, y, {
     width: valueWidth
   });
 }
@@ -61,11 +63,27 @@ function drawLabelValue(doc, x, y, label, value, options = {}) {
 function drawStackedLabelValue(doc, x, y, label, value, options = {}) {
   const width = options.width || 180;
   const labelGap = options.labelGap || 6;
+  const labelColor = options.labelColor || '#475569';
+  const valueColor = options.valueColor || '#0f172a';
 
-  doc.font('Helvetica-Bold').fontSize(9).fillColor('#475569').text(label, x, y, { width });
-  doc.font('Helvetica').fontSize(10).fillColor('#0f172a').text(value || '-', x, y + labelGap + 10, {
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(labelColor).text(label, x, y, { width });
+  doc.font('Helvetica').fontSize(10).fillColor(valueColor).text(value || '-', x, y + labelGap + 10, {
     width
   });
+}
+
+function buildPdfTheme(invoice) {
+  const payout = invoice.payoutDetails || {};
+  const textColor = payout.pdfTextColor || '#0F172A';
+
+  return {
+    backgroundColor: payout.pdfBackgroundColor || '#FFFFFF',
+    textColor,
+    headingBackgroundColor: payout.pdfHeadingBackgroundColor || '#E2E8F0',
+    mutedTextColor: textColor,
+    secondaryTextColor: textColor,
+    lineColor: '#CBD5E1'
+  };
 }
 
 const generateInvoicePdf = (invoice) => {
@@ -79,6 +97,7 @@ const generateInvoicePdf = (invoice) => {
     doc.pipe(stream);
 
     const payout = invoice.payoutDetails || {};
+    const theme = buildPdfTheme(invoice);
     const accountDisplayValue = invoice.projectAccountNumber || invoice.projectNumber || '-';
     const payeeLines = [
       payout.payeeName || invoice.contractorName,
@@ -89,21 +108,29 @@ const generateInvoicePdf = (invoice) => {
       payout.payeeEmail || payout.remittanceEmail || invoice.contractorEmail
     ].filter(Boolean);
 
+    doc.rect(0, 0, doc.page.width, doc.page.height).fill(theme.backgroundColor);
+
     let y = 48;
-    doc.font('Helvetica-Bold').fontSize(16).fillColor('#0f172a').text(payeeLines[0] || 'Contractor', 48, y);
+    doc.font('Helvetica-Bold').fontSize(16).fillColor(theme.textColor).text(payeeLines[0] || 'Contractor', 48, y);
     y += 22;
 
-    doc.font('Helvetica').fontSize(10).fillColor('#334155');
+    doc.font('Helvetica').fontSize(10).fillColor(theme.secondaryTextColor);
     for (const line of payeeLines.slice(1)) {
       doc.text(line, 48, y);
       y += 14;
     }
 
-    doc.font('Helvetica-Bold').fontSize(24).fillColor('#0f172a').text('INVOICE', 400, 48, { align: 'right' });
-    drawLabelValue(doc, 340, 92, 'DATE', formatInvoiceDate(new Date()));
-    drawLabelValue(doc, 340, 110, 'INVOICE NO.', invoice.invoiceNumber);
+    doc.font('Helvetica-Bold').fontSize(24).fillColor(theme.textColor).text('INVOICE', 400, 48, { align: 'right' });
+    drawLabelValue(doc, 340, 92, 'DATE', formatInvoiceDate(new Date()), {
+      labelColor: theme.mutedTextColor,
+      valueColor: theme.textColor
+    });
+    drawLabelValue(doc, 340, 110, 'INVOICE NO.', invoice.invoiceNumber, {
+      labelColor: theme.mutedTextColor,
+      valueColor: theme.textColor
+    });
 
-    doc.moveTo(48, 160).lineTo(547, 160).strokeColor('#cbd5e1').lineWidth(1).stroke();
+    doc.moveTo(48, 160).lineTo(547, 160).strokeColor(theme.lineColor).lineWidth(1).stroke();
 
     drawStackedLabelValue(
       doc,
@@ -111,7 +138,7 @@ const generateInvoicePdf = (invoice) => {
       176,
       'BILL TO',
       payout.billToName || process.env.INVOICE_BILL_TO_NAME || 'Myemployer',
-      { width: 170 }
+      { width: 170, labelColor: theme.mutedTextColor, valueColor: theme.textColor }
     );
     drawStackedLabelValue(
       doc,
@@ -119,7 +146,7 @@ const generateInvoicePdf = (invoice) => {
       176,
       'PERIOD',
       `${formatDate(invoice.startDate)} To ${formatDate(invoice.endDate)}`,
-      { width: 190 }
+      { width: 190, labelColor: theme.mutedTextColor, valueColor: theme.textColor }
     );
 
     const billToAddressLines = [
@@ -137,44 +164,39 @@ const generateInvoicePdf = (invoice) => {
     ].filter(Boolean);
 
     let billToY = 204;
-    doc.font('Helvetica').fontSize(10).fillColor('#334155');
+    doc.font('Helvetica').fontSize(10).fillColor(theme.secondaryTextColor);
     for (const line of billToAddressLines) {
       doc.text(line, 48, billToY);
       billToY += 13;
     }
 
     const projectSectionTop = 274;
-    doc.rect(48, projectSectionTop, 499, 24).fill('#e2e8f0');
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#475569').text('PROJECT', 56, projectSectionTop + 7, {
+    doc.rect(48, projectSectionTop, 499, 24).fill(theme.headingBackgroundColor);
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(theme.mutedTextColor).text('PROJECT', 56, projectSectionTop + 7, {
       width: 220
     });
     doc.text('ACCOUNT', 328, projectSectionTop + 7, {
       width: 150
     });
 
-    doc.font('Helvetica').fontSize(10).fillColor('#0f172a').text(invoice.projectName || '-', 48, projectSectionTop + 30, {
+    doc.font('Helvetica').fontSize(10).fillColor(theme.textColor).text(invoice.projectName || '-', 48, projectSectionTop + 30, {
       width: 220
     });
     doc.text(accountDisplayValue, 320, projectSectionTop + 30, {
       width: 150
     });
 
-    const projectMeta = [invoice.projectKey, invoice.projectNumber].filter(Boolean).join(' | ');
-    if (projectMeta) {
-      doc.font('Helvetica').fontSize(10).fillColor('#334155').text(projectMeta, 48, projectSectionTop + 48);
-    }
-
     const tableTop = projectSectionTop + 88;
     const ticketX = 48;
     const hoursX = 475;
-    doc.rect(48, tableTop, 499, 24).fill('#e2e8f0');
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#0f172a').text('TICKETS LIST', ticketX + 8, tableTop + 7);
+    doc.rect(48, tableTop, 499, 24).fill(theme.headingBackgroundColor);
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(theme.textColor).text('TICKETS LIST', ticketX + 8, tableTop + 7);
     doc.text('HOURS', hoursX, tableTop + 7, { width: 50, align: 'right' });
 
     let rowY = tableTop + 30;
     const worklogs = Array.isArray(invoice.worklogs) ? invoice.worklogs : [];
 
-    doc.font('Helvetica').fontSize(9).fillColor('#0f172a');
+    doc.font('Helvetica').fontSize(9).fillColor(theme.textColor);
     if (worklogs.length === 0) {
       doc.text('No project worklogs found.', ticketX + 8, rowY);
       rowY += 18;
@@ -186,13 +208,13 @@ const generateInvoicePdf = (invoice) => {
         doc.text(title, ticketX + 8, rowY, { width: 390 });
         rowY += Math.max(18, titleHeight + 2);
         doc.text(Number(item.quantity || 0).toFixed(2), hoursX, rowStartY, { width: 50, align: 'right' });
-        doc.moveTo(48, rowY).lineTo(547, rowY).strokeColor('#e2e8f0').lineWidth(0.6).stroke();
+        doc.moveTo(48, rowY).lineTo(547, rowY).strokeColor(theme.lineColor).lineWidth(0.6).stroke();
         rowY += 8;
       }
     }
 
     const remarksTop = Math.max(rowY + 12, 610);
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#0f172a').text('Remarks / Payment Instructions:', 48, remarksTop);
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(theme.textColor).text('Remarks / Payment Instructions:', 48, remarksTop);
 
     const remarksLines = [
       payout.payoutNotes ? `Instructions: ${payout.payoutNotes}` : null,
@@ -208,7 +230,7 @@ const generateInvoicePdf = (invoice) => {
     ].filter(Boolean);
 
     let remarksY = remarksTop + 18;
-    doc.font('Helvetica').fontSize(9).fillColor('#334155');
+    doc.font('Helvetica').fontSize(9).fillColor(theme.secondaryTextColor);
     for (const line of remarksLines) {
       doc.text(line, 48, remarksY, { width: 280 });
       remarksY += 12;
@@ -217,16 +239,22 @@ const generateInvoicePdf = (invoice) => {
     const totalsTop = remarksTop + 4;
     drawLabelValue(doc, 345, totalsTop, 'TOTAL HOURS', Number(invoice.totalHours || 0).toFixed(2), {
       labelWidth: 95,
-      valueWidth: 90
+      valueWidth: 90,
+      labelColor: theme.mutedTextColor,
+      valueColor: theme.textColor
     });
     drawLabelValue(doc, 345, totalsTop + 22, 'RATE / USD $', currency(invoice.rate), {
       labelWidth: 95,
-      valueWidth: 90
+      valueWidth: 90,
+      labelColor: theme.mutedTextColor,
+      valueColor: theme.textColor
     });
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#0f172a');
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(theme.textColor);
     drawLabelValue(doc, 345, totalsTop + 44, 'TOTAL / USD $', currency(invoice.amount), {
       labelWidth: 95,
-      valueWidth: 90
+      valueWidth: 90,
+      labelColor: theme.mutedTextColor,
+      valueColor: theme.textColor
     });
 
     doc.end();

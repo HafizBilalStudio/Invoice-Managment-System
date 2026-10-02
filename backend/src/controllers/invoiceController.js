@@ -1,6 +1,11 @@
 const db = require('../config/db');
 const { generateInvoicePdf } = require('../services/pdfService');
-const { buildInvoiceSnapshot, getUserProfileRow } = require('../services/profileService');
+const {
+  buildInvoiceSnapshot,
+  DEFAULT_INVOICE_NUMBER_FORMAT,
+  getUserProfileRow,
+  nullIfBlank
+} = require('../services/profileService');
 const { listProjectManagers } = require('../services/userService');
 const logger = require('../utils/logger');
 
@@ -9,7 +14,8 @@ const STATUS_DB_TO_LABEL = {
   PENDING_PM: 'Pending PM Approval',
   REJECTED_PM: 'Rejected by PM',
   APPROVED_PM: 'Approved by PM',
-  PAID: 'Paid'
+  PAID: 'Paid',
+  CANCELLED: 'Cancelled'
 };
 
 const STATUS_INPUT_TO_DB = {
@@ -18,11 +24,13 @@ const STATUS_INPUT_TO_DB = {
   REJECTED_PM: 'REJECTED_PM',
   APPROVED_PM: 'APPROVED_PM',
   PAID: 'PAID',
+  CANCELLED: 'CANCELLED',
   Draft: 'DRAFT',
   'Pending PM Approval': 'PENDING_PM',
   'Rejected by PM': 'REJECTED_PM',
   'Approved by PM': 'APPROVED_PM',
-  Paid: 'PAID'
+  Paid: 'PAID',
+  Cancelled: 'CANCELLED'
 };
 
 function mapInvoiceRow(row) {
@@ -92,33 +100,39 @@ async function hasApprovalAssignment(connection, invoiceId, userId) {
   return Boolean(rows[0]);
 }
 
-async function getProjectForInvoice(connection, { projectId, projectKey }) {
-  if (projectId) {
-    const [rows] = await connection.query(
-      `SELECT id, project_key, project_name, project_number, project_account_number
-       FROM projects
-       WHERE id = ?
-       LIMIT 1`,
-      [Number(projectId)]
-    );
-    return rows[0] || null;
-  }
-
-  if (projectKey) {
-    const [rows] = await connection.query(
-      `SELECT id, project_key, project_name, project_number, project_account_number
-       FROM projects
-       WHERE project_key = ?
-       LIMIT 1`,
-      [String(projectKey)]
-    );
-    return rows[0] || null;
-  }
-
-  return null;
+function canCancelInvoiceStatus(status) {
+  return ['PENDING_PM', 'REJECTED_PM', 'APPROVED_PM'].includes(String(status || '').toUpperCase());
 }
 
-async function getInvoiceEntries(connection, { userId, projectId, timesheetEntryIds }) {
+async function getTempoAccountForInvoice(connection, { accountKey, projectKey }) {
+  const resolvedAccountKey = String(accountKey || projectKey || '').trim();
+  if (!resolvedAccountKey) {
+    return null;
+  }
+
+  const [rows] = await connection.query(
+    `SELECT tempo_account_id, account_key, name, status
+     FROM tempo_accounts
+     WHERE account_key = ?
+     LIMIT 1`,
+    [resolvedAccountKey]
+  );
+
+  if (!rows[0]) {
+    return null;
+  }
+
+  return {
+    id: Number(rows[0].tempo_account_id),
+    project_key: rows[0].account_key,
+    project_name: rows[0].name,
+    project_number: rows[0].account_key,
+    project_account_number: rows[0].account_key,
+    status: rows[0].status || null
+  };
+}
+
+async function getInvoiceEntries(connection, { userId, accountKey, timesheetEntryIds }) {
   if (!Array.isArray(timesheetEntryIds) || timesheetEntryIds.length === 0) {
     return [];
   }
@@ -131,56 +145,186 @@ async function getInvoiceEntries(connection, { userId, projectId, timesheetEntry
     return [];
   }
 
+  const [jiraConnectionRows] = await connection.query(
+    `SELECT external_account_id
+     FROM oauth_connections
+     WHERE user_id = ?
+       AND provider = 'JIRA'
+     LIMIT 1`,
+    [userId]
+  );
+
+  const currentAuthorAccountId = jiraConnectionRows[0]?.external_account_id || null;
+  if (!currentAuthorAccountId) {
+    return [];
+  }
+
   const [rows] = await connection.query(
     `SELECT t.id, t.issue_key, t.work_date, t.hours, t.description,
             COALESCE(j.issue_key, t.issue_key, '') AS resolved_issue_key,
             COALESCE(j.summary, '') AS issue_summary
      FROM timesheet_entries t
      LEFT JOIN jira_issues j ON j.id = t.jira_issue_ref_id
-     WHERE t.contractor_user_id = ?
-       AND t.project_id = ?
+     WHERE t.author_account_id = ?
+       AND t.project_number = ?
        AND t.source_deleted_at IS NULL
        AND t.id IN (?)
      ORDER BY t.work_date ASC, t.issue_key ASC, t.id ASC`,
-    [userId, projectId, normalizedIds]
+    [currentAuthorAccountId, accountKey, normalizedIds]
   );
 
   return rows;
 }
 
 async function getNextInvoiceSequence(connection, projectKey) {
-  const likePattern = `%-${projectKey}`;
   const [rows] = await connection.query(
-    `SELECT invoice_number
-     FROM invoices
-     WHERE invoice_number LIKE ?`,
-    [likePattern]
+    'SELECT invoice_number FROM invoices WHERE project_key_snapshot = ?',
+    [projectKey]
   );
 
   let maxSequence = 0;
 
   for (const row of rows) {
-    const value = String(row.invoice_number || '');
-    if (!value.endsWith(`-${projectKey}`)) {
-      continue;
+    const match = /^(\d+)-/.exec(String(row.invoice_number || ''));
+    if (match) {
+      maxSequence = Math.max(maxSequence, Number(match[1]));
     }
-
-    const parts = value.split('-');
-    const sequencePart = parts.slice(0, -1).join('-');
-    if (!/^\d+$/.test(sequencePart)) {
-      continue;
-    }
-
-    maxSequence = Math.max(maxSequence, Number(sequencePart));
   }
 
   return maxSequence + 1;
+}
+
+// Jira project key (e.g. GSMAIN) carrying the most hours among the invoiced issues.
+function resolveProjectShortKey(entries) {
+  const hoursByPrefix = new Map();
+
+  for (const entry of entries) {
+    const prefix = String(entry.resolved_issue_key || entry.issue_key || '').split('-')[0].trim();
+    if (prefix) {
+      hoursByPrefix.set(prefix, (hoursByPrefix.get(prefix) || 0) + Number(entry.hours || 0));
+    }
+  }
+
+  let best = null;
+  for (const [prefix, hours] of hoursByPrefix) {
+    if (!best || hours > best.hours) {
+      best = { prefix, hours };
+    }
+  }
+
+  return best ? best.prefix : null;
+}
+
+function padDatePart(value) {
+  return String(value).padStart(2, '0');
+}
+
+function formatDateStamp(date = new Date()) {
+  return `${date.getFullYear()}${padDatePart(date.getMonth() + 1)}${padDatePart(date.getDate())}`;
+}
+
+function formatDateTimeStamp(date = new Date()) {
+  return `${formatDateStamp(date)}${padDatePart(date.getHours())}${padDatePart(date.getMinutes())}${padDatePart(date.getSeconds())}`;
+}
+
+function sanitizeInvoiceNumberSegment(value, fallback = 'NA') {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Za-z0-9._-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-._]+|[-._]+$/g, '');
+
+  return normalized || fallback;
+}
+
+function buildInvoiceNumberFromTemplate(template, { invoiceCounter, project, now }) {
+  const date = now instanceof Date ? now : new Date();
+  const tokenValues = {
+    InvoiceCounter: String(invoiceCounter),
+    AccountKey: sanitizeInvoiceNumberSegment(project.project_key || project.project_number || project.project_account_number || 'ACCOUNT'),
+    AccountNumber: sanitizeInvoiceNumberSegment(project.project_account_number || project.project_number || project.project_key || 'ACCOUNT'),
+    AccountName: sanitizeInvoiceNumberSegment(project.project_name || 'ACCOUNT'),
+    ProjectKey: sanitizeInvoiceNumberSegment(project.project_key || project.project_account_number || project.project_number || 'PROJECT'),
+    ProjectNumber: sanitizeInvoiceNumberSegment(project.project_number || project.project_account_number || project.project_key || 'PROJECT'),
+    ProjectName: sanitizeInvoiceNumberSegment(project.project_name || 'PROJECT'),
+    ProjectShortKey: sanitizeInvoiceNumberSegment(project.short_key || project.project_key || 'PROJECT'),
+    DateTime: formatDateTimeStamp(date),
+    Date: formatDateStamp(date),
+    Year: String(date.getFullYear()),
+    Month: padDatePart(date.getMonth() + 1),
+    Day: padDatePart(date.getDate())
+  };
+
+  const rendered = String(template || DEFAULT_INVOICE_NUMBER_FORMAT).replace(/\{([^}]+)\}/g, (match, token) => {
+    const key = String(token || '').trim();
+    return tokenValues[key] || '';
+  });
+
+  return sanitizeInvoiceNumberSegment(rendered, `${invoiceCounter}-${tokenValues.AccountKey}`);
+}
+
+async function invoiceNumberExists(connection, invoiceNumber) {
+  const [rows] = await connection.query('SELECT 1 FROM invoices WHERE invoice_number = ? LIMIT 1', [invoiceNumber]);
+  return Boolean(rows[0]);
+}
+
+async function generateInvoiceNumber(connection, { profileRow, project }) {
+  const scopeKey = project.project_key || 'PROJECT';
+  const template = nullIfBlank(profileRow?.invoice_number_format) || DEFAULT_INVOICE_NUMBER_FORMAT;
+  const now = new Date();
+  let invoiceCounter = await getNextInvoiceSequence(connection, scopeKey);
+
+  for (let attempt = 0; attempt < 5000; attempt += 1) {
+    const invoiceNumber = buildInvoiceNumberFromTemplate(template, {
+      invoiceCounter,
+      project,
+      now
+    });
+
+    if (invoiceNumber.length > 255) {
+      throw new Error('Generated invoice number exceeds 255 characters. Shorten the invoice number format in profile.');
+    }
+
+    // Preserve uniqueness even when the custom format omits the account key.
+    // In that case we continue incrementing the counter until we reach an unused number.
+    if (!(await invoiceNumberExists(connection, invoiceNumber))) {
+      return invoiceNumber;
+    }
+
+    invoiceCounter += 1;
+  }
+
+  throw new Error('Unable to generate a unique invoice number for this invoice.');
 }
 
 function buildInvoiceItemDescription(entry) {
   const issueKey = entry.resolved_issue_key || entry.issue_key || '';
   const issueSummary = String(entry.issue_summary || '').trim();
   return [issueKey, issueSummary].filter(Boolean).join(' - ') || 'Worklog';
+}
+
+function normalizeInvoiceDateInput(value) {
+  if (!value) {
+    return null;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) {
+    return null;
+  }
+
+  const directMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (directMatch) {
+    return directMatch[1];
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString().slice(0, 10);
 }
 
 function groupEntriesIntoInvoiceItems(entries, effectiveRate) {
@@ -326,7 +470,8 @@ async function getInvoiceDetailById(connection, invoiceId) {
             i.bank_account_last4_snapshot, i.bank_account_type_snapshot, i.bank_name_snapshot,
             i.bank_address_line1_snapshot, i.bank_address_line2_snapshot, i.bank_city_snapshot,
             i.bank_state_snapshot, i.bank_postal_code_snapshot, i.bank_country_snapshot,
-            i.payout_notes_snapshot
+            i.payout_notes_snapshot, i.pdf_background_color_snapshot,
+            i.pdf_text_color_snapshot, i.pdf_heading_background_color_snapshot
      FROM invoices i
      JOIN users u ON u.id = i.contractor_id
      LEFT JOIN users pm ON pm.id = i.pm_approver_user_id
@@ -472,7 +617,10 @@ async function getInvoiceDetailById(connection, invoiceId) {
       bankCity: invoiceRow.bank_city_snapshot,
       bankState: invoiceRow.bank_state_snapshot,
       bankPostalCode: invoiceRow.bank_postal_code_snapshot,
-      bankCountry: invoiceRow.bank_country_snapshot
+      bankCountry: invoiceRow.bank_country_snapshot,
+      pdfBackgroundColor: invoiceRow.pdf_background_color_snapshot,
+      pdfTextColor: invoiceRow.pdf_text_color_snapshot,
+      pdfHeadingBackgroundColor: invoiceRow.pdf_heading_background_color_snapshot
     },
     comments: commentRows.map((row) => ({
       id: row.id,
@@ -499,6 +647,8 @@ async function getInvoicePdfPayload(connection, invoiceId) {
             i.bank_account_type_snapshot, i.bank_name_snapshot, i.bank_address_line1_snapshot,
             i.bank_address_line2_snapshot, i.bank_city_snapshot, i.bank_state_snapshot,
             i.bank_postal_code_snapshot, i.bank_country_snapshot, i.payout_notes_snapshot,
+            i.pdf_background_color_snapshot, i.pdf_text_color_snapshot,
+            i.pdf_heading_background_color_snapshot,
             u.full_name AS contractor_name, u.email AS contractor_email
      FROM invoices i
      JOIN users u ON u.id = i.contractor_id
@@ -580,7 +730,10 @@ async function getInvoicePdfPayload(connection, invoiceId) {
       bankCity: invoiceRow.bank_city_snapshot,
       bankState: invoiceRow.bank_state_snapshot,
       bankPostalCode: invoiceRow.bank_postal_code_snapshot,
-      bankCountry: invoiceRow.bank_country_snapshot
+      bankCountry: invoiceRow.bank_country_snapshot,
+      pdfBackgroundColor: invoiceRow.pdf_background_color_snapshot,
+      pdfTextColor: invoiceRow.pdf_text_color_snapshot,
+      pdfHeadingBackgroundColor: invoiceRow.pdf_heading_background_color_snapshot
     }
   };
 }
@@ -590,13 +743,15 @@ const syncAndCreateInvoice = async (req, res) => {
   let transactionStarted = false;
 
   try {
-    const { projectId, projectKey, startDate, endDate, rate, timesheetEntryIds } = req.body || {};
+    const { accountKey, projectKey, startDate, endDate, rate, timesheetEntryIds } = req.body || {};
+    const normalizedStartDate = normalizeInvoiceDateInput(startDate);
+    const normalizedEndDate = normalizeInvoiceDateInput(endDate);
 
     if (!req.user?.id) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    if (!startDate || !endDate) {
+    if (!normalizedStartDate || !normalizedEndDate) {
       return res.status(400).json({ message: 'startDate and endDate are required' });
     }
 
@@ -604,9 +759,9 @@ const syncAndCreateInvoice = async (req, res) => {
       return res.status(400).json({ message: 'timesheetEntryIds are required for invoice creation' });
     }
 
-    const project = await getProjectForInvoice(connection, { projectId, projectKey });
+    const project = await getTempoAccountForInvoice(connection, { accountKey, projectKey });
     if (!project) {
-      return res.status(404).json({ message: 'Project not found for invoice creation' });
+      return res.status(404).json({ message: 'Tempo account not found for invoice creation' });
     }
 
     const [userRows] = await connection.query(
@@ -631,17 +786,17 @@ const syncAndCreateInvoice = async (req, res) => {
 
     const entries = await getInvoiceEntries(connection, {
       userId: contractor.id,
-      projectId: project.id,
+      accountKey: project.project_key,
       timesheetEntryIds
     });
 
     if (entries.length === 0) {
-      return res.status(400).json({ message: 'No visible synced timelogs found for this project selection' });
+      return res.status(400).json({ message: 'No visible synced timelogs found for this account selection' });
     }
 
     if (entries.length !== timesheetEntryIds.length) {
       return res.status(400).json({
-        message: 'Some selected timelogs do not belong to the current user/project and were rejected'
+        message: 'Some selected timelogs do not belong to the current user/account and were rejected'
       });
     }
 
@@ -652,13 +807,14 @@ const syncAndCreateInvoice = async (req, res) => {
          AND project_key_snapshot = ?
          AND start_date = ?
          AND end_date = ?
+         AND status <> 'CANCELLED'
        LIMIT 1`,
-      [contractor.id, project.project_key, startDate, endDate]
+      [contractor.id, project.project_key, normalizedStartDate, normalizedEndDate]
     );
 
     if (existingInvoices[0]) {
       return res.status(409).json({
-        message: 'Invoice already exists for this project and date range',
+        message: 'Invoice already exists for this account and date range',
         invoiceNumber: existingInvoices[0].invoice_number
       });
     }
@@ -667,8 +823,8 @@ const syncAndCreateInvoice = async (req, res) => {
       entries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0).toFixed(2)
     );
     const amount = Number((totalHours * effectiveRate).toFixed(2));
-    const sequence = await getNextInvoiceSequence(connection, project.project_key || 'PROJECT');
-    const invoiceNumber = `${sequence}-${project.project_key || 'PROJECT'}`;
+    project.short_key = resolveProjectShortKey(entries);
+    const invoiceNumber = await generateInvoiceNumber(connection, { profileRow, project });
 
     const lineItems = groupEntriesIntoInvoiceItems(entries, effectiveRate);
 
@@ -681,8 +837,8 @@ const syncAndCreateInvoice = async (req, res) => {
       projectName: project.project_name,
       projectNumber: project.project_number,
       projectAccountNumber: project.project_account_number,
-      startDate,
-      endDate,
+      startDate: normalizedStartDate,
+      endDate: normalizedEndDate,
       totalHours,
       rate: effectiveRate,
       amount,
@@ -709,8 +865,9 @@ const syncAndCreateInvoice = async (req, res) => {
        remittance_email_snapshot, bank_account_title_snapshot, bank_routing_number_snapshot,
        bank_account_number_snapshot, bank_account_last4_snapshot, bank_account_type_snapshot,
        bank_name_snapshot, bank_address_line1_snapshot, bank_address_line2_snapshot, bank_city_snapshot,
-       bank_state_snapshot, bank_postal_code_snapshot, bank_country_snapshot, payout_notes_snapshot)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       bank_state_snapshot, bank_postal_code_snapshot, bank_country_snapshot, payout_notes_snapshot,
+       pdf_background_color_snapshot, pdf_text_color_snapshot, pdf_heading_background_color_snapshot)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         invoiceNumber,
         contractor.id,
@@ -718,8 +875,8 @@ const syncAndCreateInvoice = async (req, res) => {
         project.project_key,
         project.project_number,
         project.project_account_number,
-        startDate,
-        endDate,
+        normalizedStartDate,
+        normalizedEndDate,
         totalHours,
         effectiveRate,
         amount,
@@ -756,7 +913,10 @@ const syncAndCreateInvoice = async (req, res) => {
         payoutDetails.bankState,
         payoutDetails.bankPostalCode,
         payoutDetails.bankCountry,
-        payoutDetails.payoutNotes
+        payoutDetails.payoutNotes,
+        payoutDetails.pdfBackgroundColor,
+        payoutDetails.pdfTextColor,
+        payoutDetails.pdfHeadingBackgroundColor
       ]
     );
 
@@ -779,10 +939,10 @@ const syncAndCreateInvoice = async (req, res) => {
         JSON.stringify({
           invoiceId,
           invoiceNumber,
-          projectId: project.id,
-          projectKey: project.project_key,
-          startDate,
-          endDate
+          tempoAccountId: project.id,
+          accountKey: project.project_key,
+          startDate: normalizedStartDate,
+          endDate: normalizedEndDate
         })
       ]
     );
@@ -848,7 +1008,7 @@ const listInvoices = async (req, res) => {
 
     if (req.query.status) {
       const requestedInvoiceStatus = String(req.query.status);
-      if (!approvalsMine || requestedInvoiceStatus === 'PENDING_PM' || requestedInvoiceStatus === 'PAID') {
+      if (!approvalsMine || requestedInvoiceStatus === 'PENDING_PM' || requestedInvoiceStatus === 'PAID' || requestedInvoiceStatus === 'CANCELLED') {
         conditions.push('i.status = ?');
         params.push(requestedInvoiceStatus);
       } else if (requestedInvoiceStatus === 'REJECTED_PM') {
@@ -1085,6 +1245,117 @@ const deleteInvoice = async (req, res) => {
       await connection.rollback();
     }
     return res.status(500).json({ message: 'Failed to delete invoice', error: error.message });
+  } finally {
+    connection.release();
+  }
+};
+
+const cancelInvoice = async (req, res) => {
+  const connection = await db.getConnection();
+  let transactionStarted = false;
+
+  try {
+    const invoiceId = Number(req.params.id);
+    if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+      return res.status(400).json({ message: 'Invalid invoice id' });
+    }
+
+    const [invoiceRows] = await connection.query(
+      `SELECT i.id, i.invoice_number, i.contractor_id, i.status,
+              a.id AS approval_id, a.current_level
+       FROM invoices i
+       LEFT JOIN approvals a ON a.invoice_id = i.id
+       WHERE i.id = ?
+       LIMIT 1`,
+      [invoiceId]
+    );
+
+    if (!invoiceRows[0]) {
+      return res.status(404).json({ message: 'Invoice not found' });
+    }
+
+    const invoice = invoiceRows[0];
+    const canCancel =
+      Number(invoice.contractor_id) === Number(req.user.id) || Boolean(req.user.isSuperAdmin);
+
+    if (!canCancel) {
+      return res.status(403).json({ message: 'You do not have access to cancel this invoice' });
+    }
+
+    if (invoice.status === 'DRAFT') {
+      return res.status(400).json({ message: 'Draft invoices should be deleted instead of cancelled' });
+    }
+
+    if (invoice.status === 'PAID') {
+      return res.status(400).json({ message: 'Paid invoices cannot be cancelled' });
+    }
+
+    if (invoice.status === 'CANCELLED') {
+      return res.status(400).json({ message: 'Invoice is already cancelled' });
+    }
+
+    if (!canCancelInvoiceStatus(invoice.status)) {
+      return res.status(400).json({ message: 'This invoice cannot be cancelled' });
+    }
+
+    await connection.beginTransaction();
+    transactionStarted = true;
+
+    await connection.query('UPDATE invoices SET status = ? WHERE id = ?', ['CANCELLED', invoiceId]);
+
+    if (invoice.approval_id) {
+      if (invoice.status === 'PENDING_PM') {
+        await connection.query(
+          `UPDATE approval_steps
+           SET status = 'REJECTED',
+               comment = COALESCE(comment, ?),
+               acted_at = COALESCE(acted_at, ?)
+           WHERE approval_id = ?
+             AND step_order = ?
+             AND status = 'PENDING'`,
+          ['Invoice cancelled by contractor', new Date(), invoice.approval_id, Number(invoice.current_level || 1)]
+        );
+      }
+
+      await connection.query(
+        `UPDATE approvals
+         SET status = CASE
+           WHEN status = 'PENDING' THEN 'REJECTED'
+           ELSE status
+         END
+         WHERE id = ?`,
+        [invoice.approval_id]
+      );
+    }
+
+    await connection.query(
+      'INSERT INTO audit_logs (user_id, action, metadata) VALUES (?, ?, ?)',
+      [
+        req.user.id,
+        'INVOICE_CANCELLED',
+        JSON.stringify({
+          invoiceId,
+          invoiceNumber: invoice.invoice_number,
+          cancelledByUserId: req.user.id,
+          previousStatus: invoice.status
+        })
+      ]
+    );
+
+    await connection.commit();
+    transactionStarted = false;
+
+    const updatedInvoice = await getInvoiceById(invoiceId);
+    return res.json({
+      success: true,
+      message: 'Invoice cancelled successfully',
+      invoice: updatedInvoice
+    });
+  } catch (error) {
+    if (transactionStarted) {
+      await connection.rollback();
+    }
+    return res.status(500).json({ message: 'Failed to cancel invoice', error: error.message });
   } finally {
     connection.release();
   }
@@ -1485,6 +1756,7 @@ module.exports = {
   listApprovers,
   getInvoiceDetail,
   deleteInvoice,
+  cancelInvoice,
   updateInvoiceStatus,
   regenerateInvoicePdf,
   addInvoiceComment,

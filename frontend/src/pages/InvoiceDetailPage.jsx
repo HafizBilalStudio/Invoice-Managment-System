@@ -78,7 +78,7 @@ function ApprovalBadge({ status, isCurrent }) {
   return <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${styles}`}>{label}</span>;
 }
 
-export default function InvoiceDetailPage() {
+export default function InvoiceDetailPage({ user }) {
   const { invoiceId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -88,6 +88,7 @@ export default function InvoiceDetailPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [approvers, setApprovers] = useState([]);
   const [selectedApproverId, setSelectedApproverId] = useState('');
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
@@ -171,6 +172,31 @@ export default function InvoiceDetailPage() {
     }
   };
 
+  const cancelInvoice = async () => {
+    if (!invoice) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Cancel submitted invoice ${invoice.invoiceNumber}? It will remain in history, exit approval flow, and its timelogs can be reused for a new invoice.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsCancelling(true);
+    setMessage('Cancelling invoice...');
+    try {
+      const response = await invoiceApi.cancel(invoice.id);
+      setInvoice((current) => ({ ...current, ...(response.invoice || {}) }));
+      setMessage('Invoice cancelled successfully.');
+    } catch (error) {
+      setMessage(error?.response?.data?.message || 'Failed to cancel invoice');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   if (isLoading) {
     return <div className="text-sm text-slate-300">Loading invoice...</div>;
   }
@@ -192,6 +218,9 @@ export default function InvoiceDetailPage() {
 
   const payout = invoice.payoutDetails || {};
   const approvalTimeline = invoice.approvalTimeline || [];
+  const canCancelInvoice =
+    Number(invoice.contractorId || 0) === Number(user?.id || 0) &&
+    !['DRAFT', 'PAID', 'CANCELLED'].includes(String(invoice.statusCode || '').toUpperCase());
 
   return (
     <div className="space-y-6">
@@ -250,6 +279,16 @@ export default function InvoiceDetailPage() {
               </button>
             </>
           ) : null}
+          {canCancelInvoice ? (
+            <button
+              type="button"
+              onClick={cancelInvoice}
+              disabled={isCancelling}
+              className="rounded-lg border border-orange-500/40 bg-orange-500/10 px-3 py-2 text-sm font-semibold text-orange-200 hover:bg-orange-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isCancelling ? 'Cancelling...' : 'Cancel Invoice'}
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -272,9 +311,9 @@ export default function InvoiceDetailPage() {
           <div className="grid gap-4 px-6 py-6 md:grid-cols-2">
             <DetailBlock label="Contractor" value={invoice.contractorName} />
             <DetailBlock label="Email" value={invoice.contractorEmail} />
-            <DetailBlock label="Project" value={[invoice.projectKey, invoice.projectName].filter(Boolean).join(' - ')} />
+            <DetailBlock label="Account" value={[invoice.projectKey, invoice.projectName].filter(Boolean).join(' - ')} />
             <DetailBlock label="Period" value={`${formatDate(invoice.startDate)} to ${formatDate(invoice.endDate)}`} />
-            <DetailBlock label="Project Number" value={invoice.projectNumber} />
+            <DetailBlock label="Account Key" value={invoice.projectNumber || invoice.projectKey} />
             <DetailBlock label="Account Number" value={invoice.projectAccountNumber} />
             <DetailBlock label="Assigned PM" value={invoice.pmApproverName || '-'} />
           </div>
